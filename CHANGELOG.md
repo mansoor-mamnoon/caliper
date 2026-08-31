@@ -45,7 +45,8 @@ tagged release onward.
   Plus `invalidate()` and `flush_buffer_bytes()` (L2-flush buffer sized from the
   device's L2, not a fixed 256 MiB constant).
 - `caliper_gpu::bench` -- `run()` drives a device layer through one measurement
-  (snapshot -> lock -> time -> throttle-poll -> read -> unlock -> reduce);
+  (snapshot -> lock -> throttle-poll -> time -> throttle-poll -> read -> unlock
+  -> reduce; per-batch "during" polling is the launcher's job);
   `run_replay()` does it from a recorded session, and requires the recording to
   be fully consumed. A clock-lock refusal (including a hard `PermissionDenied`)
   degrades to an unlocked, `clocks-unlocked`-tagged run rather than raising.
