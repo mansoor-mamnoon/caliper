@@ -75,7 +75,9 @@ impl std::fmt::Display for PtxasParseError {
 
 impl std::error::Error for PtxasParseError {}
 
-/// Parse a report, sniffing the format.
+/// Parse a report, sniffing the format. Checks in most-to-least specific order;
+/// a log that mixes formats routes to the first one it matches (`ptxas -v`,
+/// then `cuobjdump`, then `amdgpu`).
 ///
 /// # Errors
 /// [`PtxasParseError::Empty`] / [`PtxasParseError::UnrecognisedFormat`] /
@@ -138,10 +140,15 @@ pub fn parse_ptxas_verbose(text: &str) -> Result<Vec<ParsedKernel>, PtxasParseEr
         }
 
         if line.contains("registers") && (line.contains("Used ") || line.starts_with("Used ")) {
-            k.ptxas.regs_per_thread =
-                Some(num_before_phrase(line, "registers", "registers")? as u32);
+            k.ptxas.regs_per_thread = Some(reg_count(num_before_phrase(
+                line,
+                "registers",
+                "registers",
+            )?)?);
             k.ptxas.smem_static_bytes =
                 Some(opt_num_before_phrase(line, "bytes smem").unwrap_or(0));
+            // Older ptxas emits `N bytes lmem` on the "Used" line; modern ptxas
+            // folds local memory into the stack frame. Best-effort.
             if let Some(lmem) = opt_num_before_phrase(line, "bytes lmem") {
                 k.ptxas.local_bytes = Some(lmem);
             }
@@ -181,7 +188,8 @@ pub fn parse_cuobjdump_res_usage(text: &str) -> Result<Vec<ParsedKernel>, PtxasP
         if line.starts_with("REG:") || line.contains(" REG:") {
             let mut k = ParsedKernel::default();
             k.name = pending_name.take();
-            k.ptxas.regs_per_thread = Some(int_after(line, "REG:").ok_or_else(bad("REG"))? as u32);
+            k.ptxas.regs_per_thread =
+                Some(reg_count(int_after(line, "REG:").ok_or_else(bad("REG"))?)?);
             k.ptxas.stack_bytes = int_after(line, "STACK:");
             k.ptxas.smem_static_bytes = int_after(line, "SHARED:");
             k.ptxas.local_bytes = int_after(line, "LOCAL:");
@@ -235,20 +243,22 @@ pub fn parse_hip_verbose(text: &str) -> Result<Vec<ParsedKernel>, PtxasParseErro
         }
         let Some(k) = cur.as_mut() else { continue };
 
-        if let Some(v) = int_after(line, "NumVgprs:") {
-            k.ptxas.regs_per_thread = Some(v as u32);
+        // Anchor on the leading "; " so `NumVgprs:` does not also match
+        // `TotalNumVgprs:` (a distinct line that would otherwise overwrite it).
+        if let Some(v) = int_after(line, "; NumVgprs:") {
+            k.ptxas.regs_per_thread = Some(reg_count(v)?);
         }
-        if let Some(v) = int_after(line, "NumSgprs:") {
-            k.sgprs = Some(v as u32);
+        if let Some(v) = int_after(line, "; NumSgprs:") {
+            k.sgprs = Some(reg_count(v)?);
         }
-        if let Some(v) = int_after(line, "ScratchSize:") {
+        if let Some(v) = int_after(line, "; ScratchSize:") {
             k.ptxas.local_bytes = Some(v);
         }
-        if let Some(v) = int_after(line, "LDSByteSize:") {
+        if let Some(v) = int_after(line, "; LDSByteSize:") {
             k.ptxas.smem_static_bytes = Some(v);
         }
-        if let Some(v) = int_after(line, "Occupancy:") {
-            k.occupancy_hint = Some(v as u32);
+        if let Some(v) = int_after(line, "; Occupancy:") {
+            k.occupancy_hint = u32::try_from(v).ok();
         }
     }
 
@@ -318,6 +328,19 @@ fn num_before_phrase(line: &str, phrase: &str, field: &str) -> Result<u64, Ptxas
 
 /// The first run of digits after `marker`, e.g.
 /// `int_after("REG:10 STACK:0", "REG:")` -> `Some(10)`.
+/// A register / SGPR / VGPR count, range-checked. Real GPUs cap in the low
+/// hundreds; anything past 4096 is a corrupt capture, not a value to silently
+/// truncate into `u32`.
+fn reg_count(n: u64) -> Result<u32, PtxasParseError> {
+    if n > 4096 {
+        return Err(PtxasParseError::BadNumber {
+            field: "register count".to_string(),
+            value: n.to_string(),
+        });
+    }
+    Ok(n as u32)
+}
+
 fn int_after(line: &str, marker: &str) -> Option<u64> {
     let after = &line[line.find(marker)? + marker.len()..];
     let digits: String = after
@@ -334,6 +357,7 @@ mod tests {
 
     const SIMPLE: &str = include_str!("../tests/ptxas/simple.txt");
     const SPILLS: &str = include_str!("../tests/ptxas/spills_smem.txt");
+    const DYN_SMEM: &str = include_str!("../tests/ptxas/dyn_smem.txt");
     const MULTI: &str = include_str!("../tests/ptxas/multi.txt");
     const CUOBJDUMP: &str = include_str!("../tests/ptxas/cuobjdump.txt");
     const HIP: &str = include_str!("../tests/ptxas/hip.txt");
@@ -364,6 +388,16 @@ mod tests {
         assert_eq!(k.ptxas.spill_stores_bytes, Some(48));
         assert_eq!(k.ptxas.spill_loads_bytes, Some(32));
         assert_eq!(k.ptxas.smem_static_bytes, Some(99328));
+    }
+
+    #[test]
+    fn dynamic_smem_kernel_reports_static_only_plus_local() {
+        let k = &parse_any(DYN_SMEM).unwrap()[0];
+        assert_eq!(k.name.as_deref(), Some("softmax_kernel"));
+        assert_eq!(k.ptxas.smem_static_bytes, Some(128));
+        assert_eq!(k.ptxas.smem_dynamic_bytes, None); // ptxas -v never reports it
+        assert_eq!(k.ptxas.local_bytes, Some(96)); // `bytes lmem` on the Used line
+        assert_eq!(k.ptxas.regs_per_thread, Some(40));
     }
 
     #[test]
@@ -398,12 +432,23 @@ mod tests {
     fn hip_amdgpu_comment_block() {
         let k = &parse_any(HIP).unwrap()[0];
         assert_eq!(k.name.as_deref(), Some("fused_kernel"));
-        assert_eq!(k.ptxas.regs_per_thread, Some(40)); // NumVgprs
+        // NumVgprs (40), NOT TotalNumVgprs (44) which appears later in the file
+        assert_eq!(k.ptxas.regs_per_thread, Some(40));
         assert_eq!(k.sgprs, Some(36));
         assert_eq!(k.ptxas.local_bytes, Some(128)); // ScratchSize
         assert_eq!(k.ptxas.smem_static_bytes, Some(8192)); // LDSByteSize
         assert_eq!(k.occupancy_hint, Some(8));
         assert_eq!(k.ptxas.spill_stores_bytes, None);
+    }
+
+    #[test]
+    fn a_corrupt_register_count_is_rejected_not_truncated() {
+        let junk = "ptxas info    : Compiling entry function 'k' for 'sm_80'\n\
+                    ptxas info    : Used 4294967297 registers, 0 bytes cmem[0]\n";
+        assert!(matches!(
+            parse_ptxas_verbose(junk),
+            Err(PtxasParseError::BadNumber { .. })
+        ));
     }
 
     #[test]

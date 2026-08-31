@@ -125,6 +125,33 @@ def probe_unavailable(kernel_key: str = "kernel") -> str:
     )
 
 
+def probe_hard_error(kernel_key: str = "kernel") -> str:
+    return err(
+        "module_probe", "probe", {"kernel_key": kernel_key}, {"Cuda": "CUDA_ERROR_INVALID_IMAGE"}
+    )
+
+
+def _k(name: str, regs: int, smem: int = 0) -> dict:
+    return {
+        "name": name,
+        "target": "sm_89",
+        "ptxas": {
+            "regs_per_thread": regs,
+            "smem_static_bytes": smem,
+            "spill_stores_bytes": 0,
+            "spill_loads_bytes": 0,
+            "stack_bytes": 0,
+        },
+    }
+
+
+def probe_multi(kernel_key: str) -> str:
+    # Two kernels; the named one carries a distinctive register count so the
+    # pick_ptxas name match (not just "first") is observable.
+    kernels = [_k("epilogue_helper", 32), _k(kernel_key, 200, 40960)]
+    return ok("module_probe", "probe", {"kernel_key": kernel_key}, kernels)
+
+
 def happy() -> None:
     n = 40
     gpu = [round(6400.0 + 3.0 * math.sin(i / 2.0), 3) for i in range(n)]
@@ -266,6 +293,42 @@ def ptxas_unavailable() -> None:
     )
 
 
+def multi_kernel_probe() -> None:
+    n = 40
+    gpu = [6400.0] * n
+    wall = [round(g + 320.0, 3) for g in gpu]
+    write(
+        "multi_kernel_probe.jsonl",
+        [
+            snapshot(),
+            ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
+            time_batches(n, gpu, wall, [], []),
+            ok("gpu_clock", "throttle_reasons", None, []),
+            probe_multi("kernel"),
+            read(2520, True),
+            ok("gpu_clock", "unlock", None, None),
+        ],
+    )
+
+
+def probe_hard_error_fixture() -> None:
+    n = 40
+    gpu = [6400.0] * n
+    wall = [round(g + 320.0, 3) for g in gpu]
+    write(
+        "probe_hard_error.jsonl",
+        [
+            snapshot(),
+            ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
+            time_batches(n, gpu, wall, [], []),
+            ok("gpu_clock", "throttle_reasons", None, []),
+            probe_hard_error("kernel"),
+        ],
+    )
+
+
 if __name__ == "__main__":
     for f in (
         happy,
@@ -275,6 +338,8 @@ if __name__ == "__main__":
         trailing_call,
         oracle_o1,
         ptxas_unavailable,
+        multi_kernel_probe,
+        probe_hard_error_fixture,
     ):
         f()
-    print("wrote 7 bench fixtures")
+    print("wrote 9 bench fixtures")

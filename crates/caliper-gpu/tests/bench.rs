@@ -60,6 +60,21 @@ fn a_run_with_no_ptxas_is_flagged_but_not_failed() {
 }
 
 #[test]
+fn a_multi_kernel_probe_picks_the_one_matching_the_key() {
+    let rec = run_replay(&fixture("multi_kernel_probe.jsonl"), &opts(40)).unwrap();
+    // the module also has "epilogue_helper" (32 regs); the "kernel"-named one wins
+    assert_eq!(rec.ptxas.regs_per_thread, Some(200));
+    assert_eq!(rec.ptxas.smem_static_bytes, Some(40960));
+    assert!(!rec.flags.contains(&"ptxas-unavailable".to_string()));
+}
+
+#[test]
+fn a_hard_probe_error_propagates() {
+    let err = run_replay(&fixture("probe_hard_error.jsonl"), &opts(40)).unwrap_err();
+    assert!(matches!(err, GpuError::Cuda(_)), "{err:?}");
+}
+
+#[test]
 fn unlocked_run_with_throttling_is_flagged_and_cleaned() {
     let rec = run_replay(&fixture("unlocked_throttled.jsonl"), &opts(40)).unwrap();
 

@@ -1,0 +1,4 @@
+ptxas info    : Compiling entry function 'softmax_kernel' for 'sm_86'
+ptxas info    : Function properties for softmax_kernel
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 40 registers, 128 bytes smem, 96 bytes lmem, 340 bytes cmem[0]

@@ -12,7 +12,7 @@ fused_kernel:
 ; NumSgprs: 36
 ; NumVgprs: 40
 ; NumAgprs: 0
-; TotalNumVgprs: 40
+; TotalNumVgprs: 44
 ; ScratchSize: 128
 ; MemoryBound: 0
 ; FloatMode: 240

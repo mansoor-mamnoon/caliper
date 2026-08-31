@@ -28,8 +28,17 @@ def test_happy_recording_yields_a_clean_locked_result() -> None:
     assert r.flags == []
     assert r.clocks["locked"] is True
     assert r.machine["sm_arch"] == "sm_89"
+    assert r.ptxas["regs_per_thread"] == 168  # from the module probe
+    assert r.ptxas.spill_stores_bytes == 0
     assert r.schema_version == "1"
     assert r.validate() == []
+
+
+def test_ptxas_unavailable_recording_is_flagged_not_failed() -> None:
+    r = bench(recording=_rec("ptxas_unavailable.jsonl"), batches=40)
+    assert "ptxas-unavailable" in r.flags
+    assert r.ptxas["regs_per_thread"] is None
+    assert 198.0 < r.p50_us < 202.0  # type: ignore[operator]
 
 
 def test_unlocked_throttled_recording_is_flagged_and_cleaned() -> None:
