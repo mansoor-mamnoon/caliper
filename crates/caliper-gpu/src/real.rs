@@ -9,9 +9,10 @@
 //! on a machine without the implementation gets a clean, catchable failure.
 
 use caliper_core::schema::Machine;
+use caliper_core::ParsedKernel;
 
 use crate::error::{GpuError, Result};
-use crate::ports::{DeviceInfo, GpuClock, KernelLauncher};
+use crate::ports::{DeviceInfo, GpuClock, KernelLauncher, ModuleProbe};
 use crate::types::{ClockState, ClockTarget, LaunchSpec, LockOutcome, RawSamples};
 
 fn pending(what: &str) -> GpuError {
@@ -89,13 +90,34 @@ impl DeviceInfo for NvmlDeviceInfo {
     }
 }
 
-/// The three real ports for one device, bundled so they satisfy
+/// `ptxas -v` / `cuobjdump` inspection of a compiled module.
+#[derive(Debug, Default)]
+pub struct CudaModuleProbe {
+    /// Ordinal of the device.
+    pub device: u32,
+}
+
+impl CudaModuleProbe {
+    /// Open the probe for `device`.
+    pub fn open(device: u32) -> Result<Self> {
+        Ok(Self { device })
+    }
+}
+
+impl ModuleProbe for CudaModuleProbe {
+    fn probe(&mut self, _kernel_key: &str) -> Result<Vec<ParsedKernel>> {
+        Err(pending("ptxas / cuobjdump module probe"))
+    }
+}
+
+/// The real ports for one device, bundled so they satisfy
 /// [`crate::bench::DeviceLayer`].
 #[derive(Debug, Default)]
 pub struct CudaDeviceLayer {
     launcher: CudaLauncher,
     clock: NvmlClock,
     info: NvmlDeviceInfo,
+    probe: CudaModuleProbe,
 }
 
 impl CudaDeviceLayer {
@@ -105,6 +127,7 @@ impl CudaDeviceLayer {
             launcher: CudaLauncher::open(device)?,
             clock: NvmlClock::open(device)?,
             info: NvmlDeviceInfo::open(device)?,
+            probe: CudaModuleProbe::open(device)?,
         })
     }
 }
@@ -136,6 +159,12 @@ impl DeviceInfo for CudaDeviceLayer {
     }
 }
 
+impl ModuleProbe for CudaDeviceLayer {
+    fn probe(&mut self, kernel_key: &str) -> Result<Vec<ParsedKernel>> {
+        self.probe.probe(kernel_key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +186,10 @@ mod tests {
         ));
         assert!(matches!(
             NvmlDeviceInfo::open(0).unwrap().snapshot(),
+            Err(GpuError::Unsupported(_))
+        ));
+        assert!(matches!(
+            CudaModuleProbe::open(0).unwrap().probe("k"),
             Err(GpuError::Unsupported(_))
         ));
     }

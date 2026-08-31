@@ -1,0 +1,22 @@
+	.text
+	.globl	fused_kernel
+	.p2align	8
+	.type	fused_kernel,@function
+fused_kernel:
+; %bb.0:
+	s_load_b256 s[0:7], s[0:1], 0x0
+	s_endpgm
+	.section	.AMDGPU.csdata,"",@progbits
+; Kernel info:
+; codeLenInByte = 512
+; NumSgprs: 36
+; NumVgprs: 40
+; NumAgprs: 0
+; TotalNumVgprs: 40
+; ScratchSize: 128
+; MemoryBound: 0
+; FloatMode: 240
+; LDSByteSize: 8192 bytes/workgroup (compile time only)
+; SGPRBlocks: 4
+; VGPRBlocks: 9
+; Occupancy: 8

@@ -17,12 +17,13 @@ use std::io::Write;
 use std::path::Path;
 
 use caliper_core::schema::Machine;
+use caliper_core::ParsedKernel;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{GpuError, Result};
-use crate::ports::{DeviceInfo, GpuClock, KernelLauncher};
+use crate::ports::{DeviceInfo, GpuClock, KernelLauncher, ModuleProbe};
 use crate::types::{ClockState, ClockTarget, LaunchSpec, LockOutcome, RawSamples};
 
 /// One recorded port call.
@@ -149,6 +150,16 @@ impl DeviceInfo for FixturePlayer {
     }
 }
 
+impl ModuleProbe for FixturePlayer {
+    fn probe(&mut self, kernel_key: &str) -> Result<Vec<ParsedKernel>> {
+        self.next_ret(
+            "module_probe",
+            "probe",
+            serde_json::json!({ "kernel_key": kernel_key }),
+        )
+    }
+}
+
 /// Wraps a real port and appends a recording line per call.
 pub struct Recorder<T> {
     inner: T,
@@ -229,6 +240,19 @@ impl<T: DeviceInfo> DeviceInfo for Recorder<T> {
     fn snapshot(&mut self) -> Result<Machine> {
         let ret = self.inner.snapshot();
         self.write_call("device_info", "snapshot", &(), &ret)?;
+        ret
+    }
+}
+
+impl<T: ModuleProbe> ModuleProbe for Recorder<T> {
+    fn probe(&mut self, kernel_key: &str) -> Result<Vec<ParsedKernel>> {
+        let ret = self.inner.probe(kernel_key);
+        self.write_call(
+            "module_probe",
+            "probe",
+            &serde_json::json!({ "kernel_key": kernel_key }),
+            &ret,
+        )?;
         ret
     }
 }

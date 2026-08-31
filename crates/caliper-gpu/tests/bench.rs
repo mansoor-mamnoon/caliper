@@ -42,6 +42,21 @@ fn happy_run_produces_a_populated_locked_record() {
     assert_eq!(rec.machine.l2_bytes, Some(75_497_472));
     assert_eq!(rec.kernel.name.as_deref(), Some("kernel"));
     assert_eq!(rec.schema_version, "1");
+    // ptxas came from the module probe
+    assert_eq!(rec.ptxas.regs_per_thread, Some(168));
+    assert_eq!(rec.ptxas.smem_static_bytes, Some(99328));
+}
+
+#[test]
+fn a_run_with_no_ptxas_is_flagged_but_not_failed() {
+    let rec = run_replay(&fixture("ptxas_unavailable.jsonl"), &opts(40)).unwrap();
+    assert!(
+        rec.flags.contains(&"ptxas-unavailable".to_string()),
+        "{:?}",
+        rec.flags
+    );
+    assert_eq!(rec.ptxas.regs_per_thread, None);
+    assert!((198.0..202.0).contains(&rec.timing.p50_us.unwrap())); // timing still fine
 }
 
 #[test]

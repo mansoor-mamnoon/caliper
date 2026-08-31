@@ -1,0 +1,4 @@
+ptxas info    : Compiling entry function 'matmul_kernel_0d1d2d3de4de5de' for 'sm_90a'
+ptxas info    : Function properties for matmul_kernel_0d1d2d3de4de5de
+    1024 bytes stack frame, 48 bytes spill stores, 32 bytes spill loads
+ptxas info    : Used 168 registers, 99328 bytes smem, 384 bytes cmem[0]

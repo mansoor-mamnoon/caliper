@@ -106,6 +106,18 @@ fn bench_replay(recording: &str, opts_json: &str) -> PyResult<String> {
     Ok(schema::to_json(&record))
 }
 
+// --- ptxas parsing ------------------------------------------------------
+
+/// Parse a `ptxas -v` / `cuobjdump -res-usage` / HIP `-v` report, sniffing the
+/// format. Returns a JSON list of per-kernel resource usage. Raises
+/// ``ValueError`` if the text is empty / unrecognised / has no kernels.
+#[pyfunction]
+fn parse_ptxas(text: &str) -> PyResult<String> {
+    let kernels =
+        caliper_core::parse_ptxas(text).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    serde_json::to_string(&kernels).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 // --- corpus targets ------------------------------------------------------
 
 /// The kernel key for a `corpus:*` target, or `None` if it is not a known
@@ -199,6 +211,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(cross_pass_cov, module)?)?;
     module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
     module.add_function(wrap_pyfunction!(bench_replay, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_ptxas, module)?)?;
     module.add_function(wrap_pyfunction!(resolve_corpus_target, module)?)?;
     module.add_function(wrap_pyfunction!(corpus_targets, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_replay, module)?)?;

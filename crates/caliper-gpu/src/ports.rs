@@ -4,6 +4,7 @@
 //! and the fixture player advances a cursor.
 
 use caliper_core::schema::Machine;
+use caliper_core::ParsedKernel;
 
 use crate::error::Result;
 use crate::types::{ClockState, ClockTarget, LaunchSpec, LockOutcome, RawSamples};
@@ -31,4 +32,11 @@ pub trait GpuClock {
 pub trait DeviceInfo {
     /// Collect the fingerprint for the current device.
     fn snapshot(&mut self) -> Result<Machine>;
+}
+
+/// Inspects a compiled kernel's static resource usage (via `ptxas -v` /
+/// `cuobjdump`), one entry per kernel in the module.
+pub trait ModuleProbe {
+    /// Resource usage for the module `kernel_key` was compiled into.
+    fn probe(&mut self, kernel_key: &str) -> Result<Vec<ParsedKernel>>;
 }

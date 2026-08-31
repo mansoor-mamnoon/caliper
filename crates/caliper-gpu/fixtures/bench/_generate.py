@@ -104,6 +104,27 @@ def poll(reasons: list[str]) -> str:
     return ok("gpu_clock", "throttle_reasons", None, reasons)
 
 
+def probe(kernel_key: str = "kernel", regs: int = 168, smem: int = 99328) -> str:
+    kernel = {
+        "name": kernel_key,
+        "target": "sm_89",
+        "ptxas": {
+            "regs_per_thread": regs,
+            "smem_static_bytes": smem,
+            "spill_stores_bytes": 0,
+            "spill_loads_bytes": 0,
+            "stack_bytes": 0,
+        },
+    }
+    return ok("module_probe", "probe", {"kernel_key": kernel_key}, [kernel])
+
+
+def probe_unavailable(kernel_key: str = "kernel") -> str:
+    return err(
+        "module_probe", "probe", {"kernel_key": kernel_key}, {"Unsupported": "no ptxas on PATH"}
+    )
+
+
 def happy() -> None:
     n = 40
     gpu = [round(6400.0 + 3.0 * math.sin(i / 2.0), 3) for i in range(n)]
@@ -116,6 +137,7 @@ def happy() -> None:
             poll([]),
             time_batches(n, gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
+            probe("kernel"),
             read(2520, True),
             ok("gpu_clock", "unlock", None, None),
         ],
@@ -136,6 +158,7 @@ def unlocked_throttled() -> None:
             poll(["SW_POWER_CAP"]),
             time_batches(n, gpu, wall, throttled, ["SW_POWER_CAP"]),
             ok("gpu_clock", "throttle_reasons", None, ["SW_POWER_CAP"]),
+            probe("kernel"),
             read(2415, False),
         ],
     )
@@ -154,6 +177,7 @@ def cold_ramp() -> None:
             poll([]),
             time_batches(len(gpu), gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
+            probe("kernel"),
             read(2520, True),
             ok("gpu_clock", "unlock", None, None),
         ],
@@ -174,6 +198,7 @@ def lock_error() -> None:
             poll([]),
             time_batches(n, gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
+            probe("kernel"),
             read(2415, False),
         ],
     )
@@ -193,6 +218,7 @@ def trailing_call() -> None:
             poll([]),
             time_batches(n, gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
+            probe("kernel"),
             read(2520, True),
             ok("gpu_clock", "unlock", None, None),
             ok("gpu_clock", "unlock", None, None),  # <- leftover
@@ -214,6 +240,26 @@ def oracle_o1() -> None:
             poll([]),
             time_batches(n, gpu, wall, [], [], kernel_key="oracle:busy"),
             ok("gpu_clock", "throttle_reasons", None, []),
+            probe("oracle:busy"),
+            read(2520, True),
+            ok("gpu_clock", "unlock", None, None),
+        ],
+    )
+
+
+def ptxas_unavailable() -> None:
+    n = 40
+    gpu = [6400.0] * n
+    wall = [round(g + 320.0, 3) for g in gpu]
+    write(
+        "ptxas_unavailable.jsonl",
+        [
+            snapshot(),
+            ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
+            time_batches(n, gpu, wall, [], []),
+            ok("gpu_clock", "throttle_reasons", None, []),
+            probe_unavailable("kernel"),
             read(2520, True),
             ok("gpu_clock", "unlock", None, None),
         ],
@@ -221,6 +267,14 @@ def oracle_o1() -> None:
 
 
 if __name__ == "__main__":
-    for f in (happy, unlocked_throttled, cold_ramp, lock_error, trailing_call, oracle_o1):
+    for f in (
+        happy,
+        unlocked_throttled,
+        cold_ramp,
+        lock_error,
+        trailing_call,
+        oracle_o1,
+        ptxas_unavailable,
+    ):
         f()
-    print("wrote happy, unlocked_throttled, cold_ramp, lock_error, trailing_call, oracle_o1")
+    print("wrote 7 bench fixtures")

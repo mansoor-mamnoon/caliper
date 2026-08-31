@@ -84,3 +84,13 @@ tagged release onward.
   kernel key; an unknown `corpus:*` target is rejected.
 - `caliper.doctor()` / `caliper.fingerprint()` Python entry points.
 - `notebooks/dev.ipynb` (the Colab "GPU CI") and `make sync`.
+- `caliper_core::ptxas_parse` -- one output shape (`ParsedKernel`, mapping onto
+  `Record.ptxas`) from three compiler reports: `ptxas -v` (single and
+  multi-kernel, spills, shared memory), `cuobjdump -res-usage`, and the HIP /
+  `amdgpu` `; NumVgprs:` comment block. Malformed / empty / unrecognised input
+  -> `PtxasParseError`. Exposed as `caliper._core.parse_ptxas`. `ptxas` cannot
+  know a kernel's dynamic shared memory, so `smem_dynamic_bytes` stays `None`.
+- `caliper-gpu` gains a `ModuleProbe` port (fixture + `Recorder` + feature-gated
+  `real` stub), now part of the `DeviceLayer` bound. `bench::run` probes the
+  compiled module after timing and fills `Record.ptxas`; a probe that is not
+  available flags the record `ptxas-unavailable` rather than failing the run.

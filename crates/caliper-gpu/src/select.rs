@@ -16,10 +16,11 @@
 use std::path::PathBuf;
 
 use caliper_core::schema::Machine;
+use caliper_core::ParsedKernel;
 
 use crate::error::{GpuError, Result};
 use crate::fixture::FixturePlayer;
-use crate::ports::{DeviceInfo, GpuClock, KernelLauncher};
+use crate::ports::{DeviceInfo, GpuClock, KernelLauncher, ModuleProbe};
 use crate::types::{ClockState, ClockTarget, LaunchSpec, LockOutcome, RawSamples};
 
 /// Which backend to build.
@@ -154,6 +155,12 @@ impl GpuClock for DeviceLayerHandle {
 impl DeviceInfo for DeviceLayerHandle {
     fn snapshot(&mut self) -> Result<Machine> {
         dispatch!(self, snapshot())
+    }
+}
+
+impl ModuleProbe for DeviceLayerHandle {
+    fn probe(&mut self, kernel_key: &str) -> Result<Vec<ParsedKernel>> {
+        dispatch!(self, probe(kernel_key))
     }
 }
 

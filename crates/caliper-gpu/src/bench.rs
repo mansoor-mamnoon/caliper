@@ -17,20 +17,21 @@
 //! Passing a [`crate::fixture::FixturePlayer`] replays a recorded session with
 //! no GPU.
 
-use caliper_core::schema::{KernelLabel, Record};
+use caliper_core::schema::{KernelLabel, Ptxas, Record};
 use caliper_core::warmup::WarmupPlan;
-use caliper_core::{reduce, ReduceInput};
+use caliper_core::{reduce, ParsedKernel, ReduceInput};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GpuError, Result};
 use crate::fixture::FixturePlayer;
-use crate::ports::{DeviceInfo, GpuClock, KernelLauncher};
+use crate::ports::{DeviceInfo, GpuClock, KernelLauncher, ModuleProbe};
 use crate::types::{ClockTarget, GraphMode, LaunchSpec, LockOutcome};
 
-/// A device layer is anything that can launch kernels, control clocks, and
-/// describe the device. The real backend and the fixture player both satisfy it.
-pub trait DeviceLayer: KernelLauncher + GpuClock + DeviceInfo {}
-impl<T: KernelLauncher + GpuClock + DeviceInfo + ?Sized> DeviceLayer for T {}
+/// A device layer is anything that can launch kernels, control clocks, describe
+/// the device, and inspect a compiled module. The real backend and the fixture
+/// player both satisfy it.
+pub trait DeviceLayer: KernelLauncher + GpuClock + DeviceInfo + ModuleProbe {}
+impl<T: KernelLauncher + GpuClock + DeviceInfo + ModuleProbe + ?Sized> DeviceLayer for T {}
 
 /// Options for one `bench()` run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,6 +117,14 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
     throttle_reasons.extend(layer.throttle_reasons()?); // "after" poll
     throttle_reasons.extend(raw.throttle_reasons);
 
+    // Static resource usage. A probe that isn't available (no ptxas, no cuda
+    // feature) is not fatal -- the record is flagged `ptxas-unavailable`.
+    let ptxas = match layer.probe(&opts.kernel_key) {
+        Ok(kernels) => pick_ptxas(&kernels, &opts.kernel_key),
+        Err(GpuError::Unsupported(_) | GpuError::PermissionDenied(_) | GpuError::NoDevice) => None,
+        Err(other) => return Err(other),
+    };
+
     let clock_state = layer.read()?;
     if clocks_locked {
         let _ = layer.unlock();
@@ -132,6 +141,7 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
         clocks_locked,
         clocks: clock_state.into(),
         machine,
+        ptxas,
         kernel: KernelLabel {
             name: Some(opts.kernel_key.clone()),
             r#impl: opts.kernel_impl.clone(),
@@ -141,6 +151,19 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
     };
 
     reduce(input).map_err(|e| GpuError::Unsupported(format!("reduction failed: {e}")))
+}
+
+/// From a probed module, the resource usage of the kernel matching `kernel_key`,
+/// or the first kernel, or `None` if the module had no kernels.
+fn pick_ptxas(kernels: &[ParsedKernel], kernel_key: &str) -> Option<Ptxas> {
+    if kernels.is_empty() {
+        return None;
+    }
+    let chosen = kernels
+        .iter()
+        .find(|k| k.name.as_deref() == Some(kernel_key))
+        .unwrap_or(&kernels[0]);
+    Some(chosen.ptxas.clone())
 }
 
 /// Drive a recorded session (JSON Lines) through [`run`], then require the

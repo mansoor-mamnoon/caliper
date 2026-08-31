@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{Clocks, KernelLabel, Machine, Record};
+use crate::schema::{Clocks, KernelLabel, Machine, Ptxas, Record};
 use crate::stats::{summarize, Summary};
 use crate::warmup::WarmupPlan;
 
@@ -112,6 +112,10 @@ pub struct ReduceInput {
     pub machine: Machine,
     /// Kernel identity to record.
     pub kernel: KernelLabel,
+    /// Compiler resource usage, if a module probe ran. `None` -> the record is
+    /// flagged `ptxas-unavailable`.
+    #[serde(default)]
+    pub ptxas: Option<Ptxas>,
 }
 
 /// What can go wrong assembling a record.
@@ -192,8 +196,12 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
         clocks: input.clocks,
         machine: input.machine,
         kernel: input.kernel,
+        ptxas: input.ptxas.clone().unwrap_or_default(),
         ..Record::default()
     };
+    if input.ptxas.is_none() {
+        record.flags.push("ptxas-unavailable".to_string());
+    }
 
     record.timing.p10_us = Some(g.p10);
     record.timing.p50_us = Some(g.p50);
@@ -245,6 +253,7 @@ mod tests {
             clocks: Clocks::default(),
             machine: Machine::default(),
             kernel: KernelLabel::default(),
+            ptxas: Some(Ptxas::default()),
         }
     }
 
@@ -333,6 +342,28 @@ mod tests {
         assert!(f.contains(&"l2-flush-disabled".to_string()));
         // the 9999 outliers were dropped, so p50 is ~200/launch
         assert!((199.0..201.0).contains(&rec.timing.p50_us.unwrap()));
+    }
+
+    #[test]
+    fn reduce_carries_ptxas_or_flags_it_missing() {
+        let gpu = vec![6400.0; 40];
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+
+        let mut with = base_input(gpu.clone(), wall.clone());
+        with.ptxas = Some(Ptxas {
+            regs_per_thread: Some(168),
+            spill_stores_bytes: Some(48),
+            ..Ptxas::default()
+        });
+        let r = reduce(with).unwrap();
+        assert_eq!(r.ptxas.regs_per_thread, Some(168));
+        assert!(!r.flags.contains(&"ptxas-unavailable".to_string()));
+
+        let mut without = base_input(gpu, wall);
+        without.ptxas = None;
+        let r = reduce(without).unwrap();
+        assert_eq!(r.ptxas.regs_per_thread, None);
+        assert!(r.flags.contains(&"ptxas-unavailable".to_string()));
     }
 
     #[test]

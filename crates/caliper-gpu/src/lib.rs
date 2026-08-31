@@ -28,6 +28,6 @@ pub mod real;
 
 pub use bench::{run, run_replay, BenchOpts, DeviceLayer};
 pub use error::{GpuError, Result};
-pub use ports::{DeviceInfo, GpuClock, KernelLauncher};
+pub use ports::{DeviceInfo, GpuClock, KernelLauncher, ModuleProbe};
 pub use select::{open_from_env, DeviceLayerHandle, PortSelection};
 pub use types::{ClockState, ClockTarget, GraphMode, LaunchSpec, LockOutcome, RawSamples};

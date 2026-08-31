@@ -4,6 +4,7 @@
 {"port":"gpu_clock","method":"throttle_reasons","args":null,"ret":{"Ok":[]}}
 {"port":"kernel_launcher","method":"time_batches","args":{"kernel_key":"kernel","batch":32,"batches":40,"use_graph":false},"ret":{"Ok":{"gpu_us":[6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0,6400.0],"wall_us":[6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0,6720.0],"batch":32,"throttled":[],"throttle_reasons":[]}}}
 {"port":"gpu_clock","method":"throttle_reasons","args":null,"ret":{"Ok":[]}}
+{"port":"module_probe","method":"probe","args":{"kernel_key":"kernel"},"ret":{"Ok":[{"name":"kernel","target":"sm_89","ptxas":{"regs_per_thread":168,"smem_static_bytes":99328,"spill_stores_bytes":0,"spill_loads_bytes":0,"stack_bytes":0}}]}}
 {"port":"gpu_clock","method":"read","args":null,"ret":{"Ok":{"sm_mhz":2520,"mem_mhz":10501,"locked":true,"lock_method":"nvml"}}}
 {"port":"gpu_clock","method":"unlock","args":null,"ret":{"Ok":null}}
 {"port":"gpu_clock","method":"unlock","args":null,"ret":{"Ok":null}}
