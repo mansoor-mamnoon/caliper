@@ -1,12 +1,16 @@
 //! PyO3 bindings for `caliper-core`.
 //!
-//! This crate is a thin marshalling layer: it converts between Python strings /
-//! lists and `caliper-core` calls, and does no logic of its own. It is built by
-//! maturin into the `caliper._core` extension module.
+//! This crate is a thin marshalling layer: it converts between Python values and
+//! `caliper-core` calls, and does no logic of its own. It is built by maturin
+//! into the `caliper._core` extension module.
 
-use caliper_core::schema;
+use std::collections::HashMap;
+
+use caliper_core::{schema, stats, warmup};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+
+// --- schema -----------------------------------------------------------------
 
 /// The result schema version this build understands.
 #[pyfunction]
@@ -40,6 +44,53 @@ fn validate_record_json(text: &str) -> PyResult<Vec<String>> {
     schema::validate_json(text).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+// --- statistics -----------------------------------------------------------
+
+/// Summarise timing samples into `{n, min, p10, p50, p90, max, mean, mad, cov}`.
+/// Raises ``ValueError`` if the input is empty or contains a non-finite value.
+#[pyfunction]
+fn summarize(samples: Vec<f64>) -> PyResult<HashMap<String, f64>> {
+    let s = stats::summarize(&samples)
+        .ok_or_else(|| PyValueError::new_err("samples must be non-empty and finite"))?;
+    let mut out = HashMap::new();
+    out.insert("n".to_string(), s.n as f64);
+    out.insert("min".to_string(), s.min);
+    out.insert("p10".to_string(), s.p10);
+    out.insert("p50".to_string(), s.p50);
+    out.insert("p90".to_string(), s.p90);
+    out.insert("max".to_string(), s.max);
+    out.insert("mean".to_string(), s.mean);
+    out.insert("mad".to_string(), s.mad);
+    if let Some(cov) = s.cov {
+        out.insert("cov".to_string(), cov);
+    }
+    Ok(out)
+}
+
+/// Coefficient of variation of per-pass medians, or `None` with fewer than two
+/// finite passes / a zero mean.
+#[pyfunction]
+fn cross_pass_cov(pass_medians: Vec<f64>) -> Option<f64> {
+    stats::cross_pass_cov(&pass_medians)
+}
+
+// --- warm-up ------------------------------------------------------------------
+
+/// Find the first warm sample index for `times`. Returns `(start, converged)`.
+#[pyfunction]
+#[pyo3(signature = (times, window=20, tol=0.02, min_warm=30))]
+fn steady_state_index(times: Vec<f64>, window: usize, tol: f64, min_warm: usize) -> (usize, bool) {
+    let w = warmup::steady_state(
+        &times,
+        warmup::WarmupOpts {
+            window,
+            tol,
+            min_warm,
+        },
+    );
+    (w.start, w.converged)
+}
+
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", schema::CALIPER_VERSION)?;
@@ -48,5 +99,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(default_record_json, module)?)?;
     module.add_function(wrap_pyfunction!(normalize_record_json, module)?)?;
     module.add_function(wrap_pyfunction!(validate_record_json, module)?)?;
+    module.add_function(wrap_pyfunction!(summarize, module)?)?;
+    module.add_function(wrap_pyfunction!(cross_pass_cov, module)?)?;
+    module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
     Ok(())
 }

@@ -6,8 +6,12 @@
 //!
 //! The measurement engine (statistics, steady-state detection, roofline model,
 //! `ptxas` parsing, the regression threshold model, sweep-spec expansion) lands
-//! here module by module. Today it holds the result [`schema`].
+//! here module by module.
 
 pub mod schema;
+pub mod stats;
+pub mod warmup;
 
 pub use schema::{Record, SCHEMA_VERSION};
+pub use stats::{cross_pass_cov, summarize, Summary};
+pub use warmup::{steady_state, Warmup, WarmupOpts};
