@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "caliper-gpu"
+dynamic = ["version"]
+description = "Correct-by-default GPU kernel benchmarking."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Mansoor Mamnoon" }]
+keywords = [
+  "gpu",
+  "cuda",
+  "benchmark",
+  "triton",
+  "kernel",
+  "performance",
+  "profiling",
+  "roofline",
+]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Testing",
+  "Topic :: System :: Benchmark",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "build>=1.2",
+]
+
+[project.scripts]
+caliper = "caliper.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/mansoor-mamnoon/caliper"
+Source = "https://github.com/mansoor-mamnoon/caliper"
+Issues = "https://github.com/mansoor-mamnoon/caliper/issues"
+
+[tool.hatch.version]
+path = "src/caliper/__about__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/caliper"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src/caliper"]
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "l0: pure unit tests, no GPU, deterministic (run in CI on every push)",
+  "l1: contract tests against fixture ports, no GPU (run in CI on every push)",
+  "l2: on-device oracle tests, requires a CUDA GPU",
+  "l3: cross-tool tests (nsys / ncu / nvbandwidth), requires a GPU and external tools",
+  "l4: reproducibility tests (multi-run variance), requires a GPU",
+  "l6: end-to-end pipeline tests, requires a GPU",
+]
