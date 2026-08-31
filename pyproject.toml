@@ -63,6 +63,7 @@ strip = true
 target-version = "py310"
 line-length = 100
 src = ["python", "tests"]
+extend-exclude = ["docs", "notebooks", "target"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
