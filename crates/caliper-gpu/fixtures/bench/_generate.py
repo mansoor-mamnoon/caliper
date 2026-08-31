@@ -4,8 +4,9 @@
 Run from anywhere:  python3 crates/caliper-gpu/fixtures/bench/_generate.py
 
 Each fixture is a full `bench()` session in call order:
-    device_info.snapshot -> gpu_clock.lock -> kernel_launcher.time_batches
-    -> gpu_clock.throttle_reasons -> gpu_clock.read -> gpu_clock.unlock*
+    device_info.snapshot -> gpu_clock.lock -> gpu_clock.throttle_reasons (before)
+    -> kernel_launcher.time_batches -> gpu_clock.throttle_reasons (after)
+    -> gpu_clock.read -> gpu_clock.unlock*
 (*unlock only when the lock succeeded).
 """
 
@@ -98,6 +99,10 @@ def read(sm: int, locked: bool) -> str:
 LOCK_ARGS = {"sm_mhz": None, "mem_mhz": None}
 
 
+def poll(reasons: list[str]) -> str:
+    return ok("gpu_clock", "throttle_reasons", None, reasons)
+
+
 def happy() -> None:
     n = 40
     gpu = [round(6400.0 + 3.0 * math.sin(i / 2.0), 3) for i in range(n)]
@@ -107,6 +112,7 @@ def happy() -> None:
         [
             snapshot(),
             ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
             time_batches(n, gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
             read(2520, True),
@@ -126,6 +132,7 @@ def unlocked_throttled() -> None:
         [
             snapshot(),
             ok("gpu_clock", "lock", LOCK_ARGS, "Denied"),
+            poll(["SW_POWER_CAP"]),
             time_batches(n, gpu, wall, throttled, ["SW_POWER_CAP"]),
             ok("gpu_clock", "throttle_reasons", None, ["SW_POWER_CAP"]),
             read(2415, False),
@@ -143,6 +150,7 @@ def cold_ramp() -> None:
         [
             snapshot(),
             ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
             time_batches(len(gpu), gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
             read(2520, True),
@@ -162,6 +170,7 @@ def lock_error() -> None:
         [
             snapshot(),
             err("gpu_clock", "lock", LOCK_ARGS, {"PermissionDenied": "NVML_ERROR_NO_PERMISSION"}),
+            poll([]),
             time_batches(n, gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
             read(2415, False),
@@ -180,6 +189,7 @@ def trailing_call() -> None:
         [
             snapshot(),
             ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
             time_batches(n, gpu, wall, [], []),
             ok("gpu_clock", "throttle_reasons", None, []),
             read(2520, True),

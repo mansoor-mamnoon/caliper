@@ -5,12 +5,14 @@
 //!
 //! 1. `device_info::snapshot`
 //! 2. `gpu_clock::lock` (only if `opts.lock_clocks`; a refusal is not fatal)
-//! 3. `kernel_launcher::time_batches`
-//! 4. `gpu_clock::throttle_reasons` (the "after" throttle poll; per-batch "during"
-//!    polling is the launcher's job, since only it knows batch boundaries)
-//! 5. `gpu_clock::read`
-//! 6. `gpu_clock::unlock` (only if the lock succeeded)
-//! 7. [`caliper_core::reduce`]
+//! 3. `gpu_clock::throttle_reasons` — the "before" throttle poll
+//! 4. `kernel_launcher::time_batches`
+//! 5. `gpu_clock::throttle_reasons` — the "after" throttle poll (per-batch
+//!    "during" polling is the launcher's job, since only it knows batch
+//!    boundaries, and it reports `RawSamples::throttled`)
+//! 6. `gpu_clock::read`
+//! 7. `gpu_clock::unlock` (only if the lock succeeded)
+//! 8. [`caliper_core::reduce`]
 //!
 //! Passing a [`crate::fixture::FixturePlayer`] replays a recorded session with
 //! no GPU.
@@ -101,6 +103,8 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
     // real launcher exists it behaves as Off.
     let use_graph = matches!(opts.cuda_graph, GraphMode::On);
 
+    let mut throttle_reasons = layer.throttle_reasons()?; // "before" poll
+
     let spec = LaunchSpec {
         kernel_key: opts.kernel_key.clone(),
         batch: opts.batch,
@@ -109,14 +113,13 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
     };
     let raw = layer.time_batches(&spec)?;
 
-    let polled = layer.throttle_reasons().unwrap_or_default();
+    throttle_reasons.extend(layer.throttle_reasons()?); // "after" poll
+    throttle_reasons.extend(raw.throttle_reasons);
+
     let clock_state = layer.read()?;
     if clocks_locked {
         let _ = layer.unlock();
     }
-
-    let mut throttle_reasons = raw.throttle_reasons;
-    throttle_reasons.extend(polled);
 
     let input = ReduceInput {
         gpu_us: raw.gpu_us,

@@ -15,6 +15,18 @@ from typing import Any
 from caliper import _core
 
 
+class _AttrView(dict[str, Any]):
+    """A dict whose keys are also reachable as attributes (``section.p50_us``)."""
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
 class Result:
     """One measurement record.
 
@@ -60,9 +72,8 @@ class Result:
 
     # -- read accessors (the frozen public surface) -----------------------
 
-    def _section(self, name: str) -> dict[str, Any]:
-        section: dict[str, Any] = json.loads(json.dumps(self._data[name]))
-        return section
+    def _section(self, name: str) -> _AttrView:
+        return _AttrView(json.loads(json.dumps(self._data[name])))
 
     @property
     def schema_version(self) -> str:
@@ -86,31 +97,31 @@ class Result:
         return list(self._data["throttle_reasons"])
 
     @property
-    def timing(self) -> dict[str, Any]:
+    def timing(self) -> _AttrView:
         return self._section("timing")
 
     @property
-    def roofline(self) -> dict[str, Any]:
+    def roofline(self) -> _AttrView:
         return self._section("roofline")
 
     @property
-    def ptxas(self) -> dict[str, Any]:
+    def ptxas(self) -> _AttrView:
         return self._section("ptxas")
 
     @property
-    def occupancy(self) -> dict[str, Any]:
+    def occupancy(self) -> _AttrView:
         return self._section("occupancy")
 
     @property
-    def clocks(self) -> dict[str, Any]:
+    def clocks(self) -> _AttrView:
         return self._section("clocks")
 
     @property
-    def machine(self) -> dict[str, Any]:
+    def machine(self) -> _AttrView:
         return self._section("machine")
 
     @property
-    def kernel(self) -> dict[str, Any]:
+    def kernel(self) -> _AttrView:
         return self._section("kernel")
 
     @property
