@@ -1,0 +1,3 @@
+{"port":"gpu_clock","method":"lock","args":{"sm_mhz":2520,"mem_mhz":null},"ret":{"Ok":"Denied"}}
+{"port":"gpu_clock","method":"read","args":null,"ret":{"Ok":{"sm_mhz":2415,"mem_mhz":10501,"locked":false,"lock_method":null}}}
+{"port":"gpu_clock","method":"throttle_reasons","args":null,"ret":{"Ok":["SW_POWER_CAP","SW_THERMAL_SLOWDOWN"]}}

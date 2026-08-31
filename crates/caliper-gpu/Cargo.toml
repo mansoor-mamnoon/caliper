@@ -1,0 +1,28 @@
+[package]
+name = "caliper-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "caliper's device layer: kernel launch/timing, NVML clock control, and device info, behind ports that record and replay without a GPU."
+
+[features]
+default = []
+# Compiles the on-device implementations in `real`. The cudarc / nvml-wrapper
+# dependencies are wired in when that code is filled in on a CUDA host; today
+# `real` is a set of typed stubs so the trait objects and API exist everywhere.
+cuda = []
+
+[dependencies]
+caliper-core = { path = "../caliper-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

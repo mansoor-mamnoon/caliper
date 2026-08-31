@@ -1,0 +1,1 @@
+{"port":"gpu_clock","method":"lock","args":{"sm_mhz":2520,"mem_mhz":null},"ret":{"Err":{"PermissionDenied":"NVML_ERROR_NO_PERMISSION"}}}

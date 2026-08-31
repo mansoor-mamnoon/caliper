@@ -30,6 +30,9 @@ jobs:
       - name: Test
         run: cargo test --all
 
+      - name: Test (all features)
+        run: cargo test --all --all-features
+
   python:
     name: python ${{ matrix.python-version }}
     runs-on: ubuntu-latest

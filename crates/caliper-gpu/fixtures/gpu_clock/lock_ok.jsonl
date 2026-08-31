@@ -1,0 +1,4 @@
+{"port":"gpu_clock","method":"lock","args":{"sm_mhz":2520,"mem_mhz":null},"ret":{"Ok":"Locked"}}
+{"port":"gpu_clock","method":"read","args":null,"ret":{"Ok":{"sm_mhz":2520,"mem_mhz":10501,"locked":true,"lock_method":"nvml"}}}
+{"port":"gpu_clock","method":"throttle_reasons","args":null,"ret":{"Ok":[]}}
+{"port":"gpu_clock","method":"unlock","args":null,"ret":{"Ok":null}}

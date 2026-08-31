@@ -23,5 +23,18 @@ tagged release onward.
   `caliper.schema_version()` and the `caliper` CLI entry point (`--version`,
   `--help`).
 - Continuous integration: a Rust lane (`cargo fmt --check`, `clippy -D warnings`,
-  `cargo test`) and a Python lane (Ruff, Mypy, `l0`/`l1` tests, wheel build)
-  across Python 3.10-3.12.
+  `cargo test` with and without `--all-features`) and a Python lane (Ruff, Mypy,
+  `l0`/`l1` tests, wheel build) across Python 3.10-3.12.
+- `caliper_core::stats` -- p10/p50/p90 (NumPy-linear interpolation), raw MAD,
+  sample coefficient of variation, and a cross-pass CoV; rejects empty or
+  non-finite input.
+- `caliper_core::warmup` -- `steady_state()`, which finds the first warm sample
+  by walking a trailing-window median down to within a relative tolerance of the
+  series' settled value. Exposed alongside `stats` through `caliper._core`
+  (`summarize`, `cross_pass_cov`, `steady_state_index`).
+- `caliper-gpu` -- the device layer. Three ports (`KernelLauncher`, `GpuClock`,
+  `DeviceInfo`), a `FixturePlayer` that replays a recorded JSON Lines session as
+  any port with no GPU, a `Recorder` that wraps a real port and writes that
+  recording, and seed fixtures. The on-device implementations in `real` (behind
+  the `cuda` feature) are typed stubs for now; they are filled in and validated
+  on a CUDA host.
