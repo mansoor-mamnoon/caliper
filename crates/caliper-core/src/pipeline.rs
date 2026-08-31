@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::roofline::RooflineSpec;
 use crate::schema::{Clocks, KernelLabel, Machine, Ptxas, Record};
 use crate::stats::{summarize, Summary};
 use crate::warmup::WarmupPlan;
@@ -116,6 +117,20 @@ pub struct ReduceInput {
     /// flagged `ptxas-unavailable`.
     #[serde(default)]
     pub ptxas: Option<Ptxas>,
+    /// Threads per block of the timed launch, if the launcher reported it.
+    /// With `ptxas` and `machine.sm_arch` present this drives the occupancy
+    /// section; absent, occupancy is left empty (it is advisory context, not a
+    /// gate).
+    #[serde(default)]
+    pub block_size: Option<u32>,
+    /// Total grid blocks of the timed launch, for the occupancy wave count.
+    #[serde(default)]
+    pub grid_blocks: Option<u32>,
+    /// Roofline inputs (dtype + FLOP / HBM-byte counts) for the workload, if
+    /// the caller can supply them. Drives the roofline section against the
+    /// per-launch median time.
+    #[serde(default)]
+    pub roofline: Option<RooflineSpec>,
 }
 
 /// What can go wrong assembling a record.
@@ -231,7 +246,56 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
         record.flags.push("warmup-not-converged".to_string());
     }
 
+    fill_occupancy(
+        &mut record,
+        input.ptxas.as_ref(),
+        input.block_size,
+        input.grid_blocks,
+    );
+    fill_roofline(&mut record, input.roofline.as_ref(), g.p50);
+
     Ok(record)
+}
+
+/// Populate `record.occupancy` from the CUDA occupancy model, when the static
+/// resource usage, the launch block size, and the architecture are all known.
+/// A no-op otherwise -- occupancy is advisory context.
+fn fill_occupancy(
+    record: &mut Record,
+    ptxas: Option<&Ptxas>,
+    block_size: Option<u32>,
+    grid_blocks: Option<u32>,
+) {
+    let (Some(px), Some(block), Some(arch)) = (ptxas, block_size, record.machine.sm_arch.clone())
+    else {
+        return;
+    };
+    let Some(regs) = px.regs_per_thread else {
+        return;
+    };
+    let smem64 = px.smem_static_bytes.unwrap_or(0) + px.smem_dynamic_bytes.unwrap_or(0);
+    let smem = u32::try_from(smem64).unwrap_or(u32::MAX);
+    if let Some(occ) = crate::occupancy::occupancy_section(
+        &arch,
+        regs,
+        smem,
+        block,
+        grid_blocks,
+        record.machine.sm_count,
+    ) {
+        record.occupancy = occ;
+    }
+}
+
+/// Populate `record.roofline` from the roofline model against the per-launch
+/// median time (`p50_us`). A no-op when no spec was supplied.
+fn fill_roofline(record: &mut Record, spec: Option<&RooflineSpec>, p50_us: f64) {
+    let Some(spec) = spec else {
+        return;
+    };
+    let arch = record.machine.sm_arch.clone().unwrap_or_default();
+    let res = crate::roofline::analyze(&arch, spec, p50_us * 1.0e-6);
+    record.roofline = crate::roofline::roofline_section(&res);
 }
 
 #[cfg(test)]
@@ -254,6 +318,9 @@ mod tests {
             machine: Machine::default(),
             kernel: KernelLabel::default(),
             ptxas: Some(Ptxas::default()),
+            block_size: None,
+            grid_blocks: None,
+            roofline: None,
         }
     }
 
@@ -364,6 +431,61 @@ mod tests {
         let r = reduce(without).unwrap();
         assert_eq!(r.ptxas.regs_per_thread, None);
         assert!(r.flags.contains(&"ptxas-unavailable".to_string()));
+    }
+
+    #[test]
+    fn reduce_fills_occupancy_when_given_arch_ptxas_and_block_size() {
+        let gpu = vec![6400.0; 40];
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+        let mut input = base_input(gpu, wall);
+        input.machine.sm_arch = Some("sm_89".to_string());
+        input.machine.sm_count = Some(128);
+        input.ptxas = Some(Ptxas {
+            regs_per_thread: Some(168),
+            smem_static_bytes: Some(99_328),
+            ..Ptxas::default()
+        });
+        input.block_size = Some(256);
+        input.grid_blocks = Some(4096);
+
+        let rec = reduce(input).unwrap();
+        // sm_89, 168 regs, ~99 KiB smem, 256 threads -> 1 block, 8 warps/48.
+        assert!((rec.occupancy.theoretical.unwrap() - 8.0 / 48.0).abs() < 1e-9);
+        assert_eq!(rec.occupancy.active_warps_per_sm, Some(8));
+        assert!(rec.occupancy.waves.unwrap() > 0.0);
+        assert!(crate::schema::validate(&rec).is_empty());
+    }
+
+    #[test]
+    fn reduce_leaves_occupancy_empty_without_launch_geometry() {
+        let gpu = vec![6400.0; 40];
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+        let mut input = base_input(gpu, wall);
+        input.machine.sm_arch = Some("sm_89".to_string());
+        // no block_size -> occupancy stays default
+        let rec = reduce(input).unwrap();
+        assert!(rec.occupancy.theoretical.is_none());
+    }
+
+    #[test]
+    fn reduce_fills_roofline_from_the_spec_and_p50() {
+        // ~200 us/launch, a 4096^3 bf16 GEMM on an H100.
+        let gpu = vec![6400.0; 40];
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+        let n = 4096.0_f64;
+        let mut input = base_input(gpu, wall);
+        input.machine.sm_arch = Some("sm_90".to_string());
+        input.roofline = Some(crate::roofline::RooflineSpec {
+            dtype: "bf16".to_string(),
+            flops: 2.0 * n * n * n,
+            bytes_hbm: 3.0 * n * n * 2.0,
+        });
+
+        let rec = reduce(input).unwrap();
+        assert!(rec.roofline.achieved_tflops.unwrap() > 0.0);
+        assert_eq!(rec.roofline.bound.as_deref(), Some("compute"));
+        assert!(rec.roofline.ridge_point.unwrap() > 0.0);
+        assert!(crate::schema::validate(&rec).is_empty());
     }
 
     #[test]

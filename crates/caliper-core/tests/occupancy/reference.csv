@@ -1,0 +1,30 @@
+# CUDA theoretical-occupancy reference values.
+#
+# Computed against the CUDA Occupancy Calculator model:
+#   - CUDA C Programming Guide, "Compute Capabilities" technical-specification table
+#     (max warps/SM, max blocks/SM, 32-bit registers/SM, shared memory/SM).
+#   - cuda_occupancy.h: registers are allocated per warp, the total rounded up to
+#     256; shared memory is (per-block bytes + reserved) rounded up to the arch's
+#     allocation unit (128 B on cc >= 7.0). Reserved shared memory per block is
+#     1024 B on cc >= 8.0, else 0.
+#
+# The `limiter` is the resource that bounds active blocks, checked in the order
+# registers, shared memory, warps, blocks (a tunable resource is reported ahead
+# of a hard architectural cap).
+#
+# columns: arch, regs_per_thread, smem_bytes_per_block, threads_per_block, occupancy, active_warps_per_sm, limiter
+sm_70,48,0,256,0.625,40,registers
+sm_70,64,0,128,0.5,32,registers
+sm_75,32,0,256,1.0,32,warps
+sm_75,96,0,256,0.5,16,registers
+sm_80,32,0,256,1.0,64,registers
+sm_80,64,0,256,0.5,32,registers
+sm_80,128,0,128,0.25,16,registers
+sm_80,32,101376,256,0.125,8,sharedmemory
+sm_86,32,0,256,1.0,48,warps
+sm_86,64,0,256,0.6666666666666666,32,registers
+sm_89,32,0,128,1.0,48,warps
+sm_89,168,99328,256,0.16666666666666666,8,registers
+sm_90,128,0,256,0.25,16,registers
+sm_90,255,0,256,0.125,8,registers
+sm_120,32,0,128,1.0,48,warps

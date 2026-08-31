@@ -27,6 +27,27 @@ def bench_replay(recording: str, opts_json: str, /) -> str: ...
 # ptxas parsing
 def parse_ptxas(text: str, /) -> str: ...
 
+# occupancy
+def theoretical_occupancy(
+    arch: str,
+    regs_per_thread: int,
+    smem_bytes_per_block: int,
+    threads_per_block: int,
+    /,
+) -> str | None: ...
+
+# roofline
+def roofline_analyze(
+    arch: str,
+    dtype: str,
+    flops: float,
+    bytes_hbm: float,
+    seconds: float,
+    /,
+) -> str: ...
+def peak_compute_tflops(arch: str, dtype: str, /) -> float | None: ...
+def peak_hbm_gbps(arch: str, /) -> float | None: ...
+
 # corpus targets
 def resolve_corpus_target(name: str, /) -> str | None: ...
 def corpus_targets() -> list[tuple[str, str, str]]: ...

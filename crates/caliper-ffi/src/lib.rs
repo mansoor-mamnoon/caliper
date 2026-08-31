@@ -118,6 +118,57 @@ fn parse_ptxas(text: &str) -> PyResult<String> {
     serde_json::to_string(&kernels).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+// --- occupancy -----------------------------------------------------------
+
+/// Theoretical occupancy for a kernel on `arch` from the CUDA occupancy model.
+/// Returns `{theoretical, active_warps_per_sm, active_blocks_per_sm, limiter}`
+/// as JSON, or `None` if `arch` is unknown, `threads_per_block` is 0 or above
+/// 1024, or `regs_per_thread` exceeds 255.
+#[pyfunction]
+fn theoretical_occupancy(
+    arch: &str,
+    regs_per_thread: u32,
+    smem_bytes_per_block: u32,
+    threads_per_block: u32,
+) -> Option<String> {
+    let est = caliper_core::occupancy::theoretical_occupancy(
+        arch,
+        regs_per_thread,
+        smem_bytes_per_block,
+        threads_per_block,
+    )?;
+    Some(serde_json::to_string(&est).expect("OccupancyEstimate serialises"))
+}
+
+// --- roofline ----------------------------------------------------------------
+
+/// Run the roofline model. Returns the analysis as JSON: `achieved_tflops`,
+/// `achieved_gbps`, `arithmetic_intensity`, `ridge_point`, `roofline_pct`,
+/// `bound`, and the `peak_*` ceilings used.
+#[pyfunction]
+fn roofline_analyze(arch: &str, dtype: &str, flops: f64, bytes_hbm: f64, seconds: f64) -> String {
+    let spec = caliper_core::roofline::RooflineSpec {
+        dtype: dtype.to_string(),
+        flops,
+        bytes_hbm,
+    };
+    let r = caliper_core::roofline::analyze(arch, &spec, seconds);
+    serde_json::to_string(&r).expect("RooflineResult serialises")
+}
+
+/// The dtype-aware compute ceiling (TFLOP/s) for `arch`, or `None` if that
+/// architecture/dtype pair is not in the peaks table.
+#[pyfunction]
+fn peak_compute_tflops(arch: &str, dtype: &str) -> Option<f64> {
+    caliper_core::roofline::peak_compute_tflops(arch, dtype)
+}
+
+/// The datasheet HBM bandwidth ceiling (GB/s) for `arch`, or `None` if unknown.
+#[pyfunction]
+fn peak_hbm_gbps(arch: &str) -> Option<f64> {
+    caliper_core::roofline::peak_hbm_gbps(arch)
+}
+
 // --- corpus targets ------------------------------------------------------
 
 /// The kernel key for a `corpus:*` target, or `None` if it is not a known
@@ -212,6 +263,10 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
     module.add_function(wrap_pyfunction!(bench_replay, module)?)?;
     module.add_function(wrap_pyfunction!(parse_ptxas, module)?)?;
+    module.add_function(wrap_pyfunction!(theoretical_occupancy, module)?)?;
+    module.add_function(wrap_pyfunction!(roofline_analyze, module)?)?;
+    module.add_function(wrap_pyfunction!(peak_compute_tflops, module)?)?;
+    module.add_function(wrap_pyfunction!(peak_hbm_gbps, module)?)?;
     module.add_function(wrap_pyfunction!(resolve_corpus_target, module)?)?;
     module.add_function(wrap_pyfunction!(corpus_targets, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_replay, module)?)?;

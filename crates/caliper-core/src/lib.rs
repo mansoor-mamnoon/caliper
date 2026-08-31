@@ -9,17 +9,21 @@
 //! model, sweep-spec expansion) lands here module by module.
 
 pub mod doctor;
+pub mod occupancy;
 pub mod oracles;
 pub mod pipeline;
 pub mod ptxas_parse;
+pub mod roofline;
 pub mod schema;
 pub mod stats;
 pub mod warmup;
 
 pub use doctor::{assess, DoctorFacts, DoctorReport};
+pub use occupancy::{theoretical_occupancy, Limiter, OccupancyEstimate};
 pub use oracles::{fit_line, LineFit, OracleCheck};
 pub use pipeline::{flush_buffer_bytes, invalidate, reduce, PipelineError, ReduceInput};
 pub use ptxas_parse::{parse_any as parse_ptxas, ParsedKernel, PtxasParseError};
+pub use roofline::{analyze as roofline_analyze, Bound, RooflineResult, RooflineSpec};
 pub use schema::{Record, SCHEMA_VERSION};
 pub use stats::{cross_pass_cov, summarize, Summary};
 pub use warmup::{steady_state, Warmup, WarmupOpts, WarmupPlan};

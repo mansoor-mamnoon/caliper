@@ -94,3 +94,22 @@ tagged release onward.
   `real` stub), now part of the `DeviceLayer` bound. `bench::run` probes the
   compiled module after timing and fills `Record.ptxas`; a probe that is not
   available flags the record `ptxas-unavailable` rather than failing the run.
+- `caliper_core::occupancy` -- the CUDA theoretical-occupancy model: from an
+  architecture, registers per thread, shared memory per block, and block size it
+  computes resident blocks per SM, active warps, the occupancy fraction, and
+  which resource is the limiter, plus a scheduling-wave count. Verified against a
+  checked-in CUDA Occupancy Calculator reference table
+  (`crates/caliper-core/tests/occupancy/reference.csv`) covering Volta through
+  Blackwell. Exposed as `caliper._core.theoretical_occupancy`.
+- `caliper_core::roofline` -- a per-architecture, dtype-aware peaks table (FP32
+  FMA, tensor-core dense for fp16/bf16/tf32/fp8, and HBM bandwidth for SM70/75/
+  80/86/89/90/120 and CDNA3), every cell carrying a `source:` citation to a
+  vendor whitepaper or datasheet. `analyze()` reports achieved TFLOP/s and GB/s
+  (matching the O2/O3 oracle formulas), arithmetic intensity, the ridge point,
+  and a `bound` of `compute` / `memory` / `latency` / `unknown`. Exposed as
+  `caliper._core.roofline_analyze`, `peak_compute_tflops`, `peak_hbm_gbps`.
+- `reduce()` now fills `Record.occupancy` and `Record.roofline` when the caller
+  supplies launch geometry (`block_size`, `grid_blocks`) and a roofline spec
+  (dtype + FLOP / HBM-byte counts) on `ReduceInput`; both sections stay empty
+  otherwise. The on-device `ModuleProbe` will also cross-check the model against
+  the driver's `cuOccupancyMaxActiveBlocksPerMultiprocessor`.

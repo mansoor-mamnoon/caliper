@@ -148,6 +148,12 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
             dtype: opts.dtype.clone(),
             ..KernelLabel::default()
         },
+        // Launch geometry and a roofline spec are not yet reported by the
+        // launcher port; the on-device path fills these in. Until then the
+        // occupancy and roofline sections stay empty.
+        block_size: None,
+        grid_blocks: None,
+        roofline: None,
     };
 
     reduce(input).map_err(|e| GpuError::Unsupported(format!("reduction failed: {e}")))
