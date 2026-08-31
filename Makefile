@@ -1,10 +1,19 @@
-.PHONY: install develop rust-fmt rust-lint rust-test lint fmt typecheck test check build clean
+.PHONY: install develop sync rust-fmt rust-lint rust-test lint fmt typecheck test check build clean
 
 install:
 	pip install -e ".[dev]"
 
 develop:
 	maturin develop
+
+# Push the current branch and print the one-liner to run the GPU CI on Colab.
+sync:
+	@git push -u origin $$(git branch --show-current)
+	@echo
+	@echo "Open notebooks/dev.ipynb on Colab, or paste into a GPU cell:"
+	@echo "  !curl -sSf https://sh.rustup.rs | sh -s -- -y >/dev/null && . \$$HOME/.cargo/env \\"
+	@echo "   && git clone --depth 1 -b $$(git branch --show-current) https://github.com/mansoor-mamnoon/caliper \\"
+	@echo "   && cd caliper && pip -q install -e '.[dev]' && cargo test --all && pytest -q && caliper doctor"
 
 rust-fmt:
 	cargo fmt --all --check

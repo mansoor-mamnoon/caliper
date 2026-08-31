@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use caliper_core::{schema, stats, warmup};
-use caliper_gpu::{run_replay, BenchOpts};
+use caliper_gpu::fixture::FixturePlayer;
+use caliper_gpu::{doctor as gpu_doctor, run_replay, BenchOpts, DeviceInfo};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -105,6 +106,51 @@ fn bench_replay(recording: &str, opts_json: &str) -> PyResult<String> {
     Ok(schema::to_json(&record))
 }
 
+// --- doctor / fingerprint --------------------------------------------------
+
+/// Run `caliper doctor` against a recorded device session; returns the report
+/// as JSON. Raises ``ValueError`` if the recording is malformed.
+#[pyfunction]
+fn doctor_replay(recording: &str) -> PyResult<String> {
+    let mut layer =
+        FixturePlayer::from_jsonl(recording).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(gpu_doctor::run(&mut layer).to_json())
+}
+
+/// Run `caliper doctor` against the backend selected by `CALIPER_GPU_PORTS`
+/// (default `real`; without the `cuda` build feature that is "no device").
+#[pyfunction]
+fn doctor_from_env() -> String {
+    match caliper_gpu::open_from_env() {
+        Ok(mut handle) => gpu_doctor::run(&mut handle).to_json(),
+        Err(_) => caliper_core::doctor::DoctorReport::no_device().to_json(),
+    }
+}
+
+/// The machine fingerprint from a recorded session, as JSON. Raises
+/// ``ValueError`` if the recording is malformed or has no device snapshot.
+#[pyfunction]
+fn fingerprint_replay(recording: &str) -> PyResult<String> {
+    let mut layer =
+        FixturePlayer::from_jsonl(recording).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let machine = layer
+        .snapshot()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    serde_json::to_string(&machine).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// The machine fingerprint from the `CALIPER_GPU_PORTS` backend. Raises
+/// ``ValueError`` when there is no device.
+#[pyfunction]
+fn fingerprint_from_env() -> PyResult<String> {
+    let mut handle =
+        caliper_gpu::open_from_env().map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let machine = handle
+        .snapshot()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    serde_json::to_string(&machine).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", schema::CALIPER_VERSION)?;
@@ -117,5 +163,9 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(cross_pass_cov, module)?)?;
     module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
     module.add_function(wrap_pyfunction!(bench_replay, module)?)?;
+    module.add_function(wrap_pyfunction!(doctor_replay, module)?)?;
+    module.add_function(wrap_pyfunction!(doctor_from_env, module)?)?;
+    module.add_function(wrap_pyfunction!(fingerprint_replay, module)?)?;
+    module.add_function(wrap_pyfunction!(fingerprint_from_env, module)?)?;
     Ok(())
 }

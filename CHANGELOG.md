@@ -67,3 +67,18 @@ tagged release onward.
   `.ptxas` / etc.
 - Fixture recordings may carry `#`-prefixed header/comment lines
   (`# caliper-fixture v=... arch=...`).
+- `caliper_core::oracles` -- analytic expectations and pass/fail checks for the
+  self-check kernels O1 (calibrated duration), O2 (streaming triad / L2 flush),
+  O3 (FMA peak), O4 (launch overhead), O6 (throttle detection), plus a
+  least-squares `fit_line`. The kernels themselves are `caliper-gpu/kernels/
+  oracles.cu` (compiled and run on a CUDA host).
+- `caliper_core::doctor` -- `assess()` turns gathered device facts into a
+  verdict (`fit` / `unfit` / `error`), an `environment` (`normal` /
+  `constrained`), per-check detail, notes, and an exit code. `caliper-gpu` adds
+  `doctor::gather` / `doctor::run` over a device layer.
+- CLI: real `caliper bench` (recorded-session path, `--json`, `--warmup`,
+  `--cuda-graph`, `--no-flush-l2`, `--no-lock-clocks`), `caliper doctor`
+  (exit 0 fit / 1 unfit / 2 error), and `caliper fingerprint`. `corpus:o1..o6`
+  resolve to the built-in oracle kernels.
+- `caliper.doctor()` / `caliper.fingerprint()` Python entry points.
+- `notebooks/dev.ipynb` (the Colab "GPU CI") and `make sync`.

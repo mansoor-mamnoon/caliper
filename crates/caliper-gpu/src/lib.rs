@@ -15,6 +15,8 @@
 //! orchestration above the ports does.
 
 pub mod bench;
+pub mod corpus;
+pub mod doctor;
 pub mod error;
 pub mod fixture;
 pub mod ports;

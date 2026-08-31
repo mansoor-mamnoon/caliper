@@ -1,0 +1,4 @@
+# caliper-fixture v=0.0.1 arch=sm_89 (synthetic, see _generate.py)
+{"port":"device_info","method":"snapshot","args":null,"ret":{"Ok":{"gpu_name":"NVIDIA GeForce RTX 4090","sm_arch":"sm_89","vram_mib":24564,"sm_count":128,"l2_bytes":75497472,"bar1_mib":32768,"driver":"550.90.07","cuda_runtime":"12.4","cuda_driver":"12.4","nvml_version":"12.550.90","ecc":true,"mig":"disabled","persistence_mode":false,"pcie_gen":4,"pcie_width":16,"toolkit":{"triton":"3.2.0","torch":"2.6.0","ptxas":"12.4.131","nvcc":"12.4.131"}}}}
+{"port":"gpu_clock","method":"lock","args":{"sm_mhz":null,"mem_mhz":null},"ret":{"Ok":"Denied"}}
+{"port":"gpu_clock","method":"throttle_reasons","args":null,"ret":{"Ok":[]}}

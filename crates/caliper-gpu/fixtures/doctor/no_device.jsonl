@@ -1,0 +1,2 @@
+# caliper-fixture v=0.0.1 arch=sm_89 (synthetic, see _generate.py)
+{"port":"device_info","method":"snapshot","args":null,"ret":{"Err":"NoDevice"}}

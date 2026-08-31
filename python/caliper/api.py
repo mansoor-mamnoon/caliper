@@ -98,3 +98,45 @@ def bench(
         "warmup": _warmup_plan(warmup, warmup_window, warmup_tol, warmup_min),
     }
     return Result.from_json(_core.bench_replay(recording, json.dumps(opts)))
+
+
+def _read(fixture: str | Path | None, recording: str | None) -> str | None:
+    if recording is not None:
+        return recording
+    if fixture is not None:
+        return Path(fixture).read_text()
+    return None
+
+
+def doctor(
+    *,
+    fixture: str | Path | None = None,
+    recording: str | None = None,
+) -> dict[str, Any]:
+    """Assess whether this machine is fit to benchmark.
+
+    With no ``fixture`` / ``recording`` this probes the backend selected by
+    ``CALIPER_GPU_PORTS`` (default: the real device, which is "no device found"
+    on a build without CUDA). The returned dict has ``verdict``, ``environment``,
+    ``checks``, ``notes``, and ``exit_code``.
+    """
+    text = _read(fixture, recording)
+    raw = _core.doctor_from_env() if text is None else _core.doctor_replay(text)
+    report: dict[str, Any] = json.loads(raw)
+    return report
+
+
+def fingerprint(
+    *,
+    fixture: str | Path | None = None,
+    recording: str | None = None,
+) -> dict[str, Any]:
+    """The machine fingerprint (GPU, driver, toolchain, ...).
+
+    Sources the same way as :func:`doctor`. Raises ``ValueError`` when there is
+    no device.
+    """
+    text = _read(fixture, recording)
+    raw = _core.fingerprint_from_env() if text is None else _core.fingerprint_replay(text)
+    machine: dict[str, Any] = json.loads(raw)
+    return machine

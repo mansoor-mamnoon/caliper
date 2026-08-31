@@ -8,11 +8,15 @@
 //! pipeline, the roofline model, `ptxas` parsing, the regression threshold
 //! model, sweep-spec expansion) lands here module by module.
 
+pub mod doctor;
+pub mod oracles;
 pub mod pipeline;
 pub mod schema;
 pub mod stats;
 pub mod warmup;
 
+pub use doctor::{assess, DoctorFacts, DoctorReport};
+pub use oracles::{fit_line, LineFit, OracleCheck};
 pub use pipeline::{flush_buffer_bytes, invalidate, reduce, PipelineError, ReduceInput};
 pub use schema::{Record, SCHEMA_VERSION};
 pub use stats::{cross_pass_cov, summarize, Summary};
