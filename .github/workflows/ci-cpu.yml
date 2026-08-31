@@ -9,7 +9,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  cpu:
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all
+
+  python:
     name: python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
@@ -23,6 +44,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Install
         run: |
@@ -40,5 +65,5 @@ jobs:
       - name: Test (l0 + l1)
         run: pytest -m "l0 or l1"
 
-      - name: Build package
-        run: python -m build
+      - name: Build wheel
+        run: maturin build --out dist

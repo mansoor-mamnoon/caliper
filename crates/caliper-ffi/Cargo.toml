@@ -1,0 +1,22 @@
+[package]
+name = "caliper-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "PyO3 bindings that expose caliper-core to Python as the caliper._core extension module."
+publish = false
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+caliper-core = { path = "../caliper-core" }
+serde_json = { workspace = true }
+pyo3 = { version = "0.24", features = ["extension-module"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

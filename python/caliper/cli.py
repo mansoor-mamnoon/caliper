@@ -1,8 +1,8 @@
 """Command-line entry point for caliper.
 
-Only ``--version`` and ``--help`` are wired up so far. The measurement,
-sweep, compare, selftest, validate, and submit commands are being implemented
-incrementally; each will be added here as its module lands.
+Only ``--version`` and ``--help`` are wired up so far. The doctor, fingerprint,
+bench, sweep, compare, selftest, validate, and submit commands are being
+implemented incrementally; each is added here as its supporting code lands.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from caliper.__about__ import __version__
+from caliper import __version__
 
 _PLANNED_COMMANDS = (
     "doctor",
@@ -41,8 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the caliper CLI. Returns a process exit code."""
     parser = _build_parser()
-    args, extra = parser.parse_known_args(argv)
-    del args
+    _args, extra = parser.parse_known_args(argv)
 
     if extra:
         print(

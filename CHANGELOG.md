@@ -8,12 +8,20 @@ tagged release onward.
 ## [Unreleased]
 
 ### Added
-- Project scaffold: `src/` layout, packaging (`caliper-gpu`), Ruff + Mypy
-  configuration, and pytest markers (`l0`/`l1`/`l2`/`l3`/`l4`/`l6`).
-- `caliper._internal.schema`: the `Result` record and its nested sections
+- Project scaffold: a Cargo workspace with `caliper-core` (pure Rust measurement
+  logic) and `caliper-ffi` (PyO3 bindings), built into a Python package with
+  maturin. Ruff + Mypy for Python, rustfmt + Clippy for Rust, pytest markers
+  `l0`/`l1`/`l2`/`l3`/`l4`/`l6`.
+- `caliper_core::schema`: the versioned `Record` type and its sections
   (`KernelLabel`, `Timing`, `Roofline`, `Ptxas`, `Occupancy`, `Clocks`,
-  `Machine`, `Toolkit`), with `to_dict()` / `from_dict()` and a JSON round-trip
-  test.
-- Minimal `caliper` CLI entry point (`--version`, `--help`).
-- Continuous integration for the no-GPU test surface (Ruff, Mypy, `l0`/`l1`
-  tests, package build) across Python 3.10-3.12.
+  `Machine`, `Toolkit`), with canonical JSON serialisation, lenient parsing
+  (unknown keys ignored, missing sections defaulted), and a `validate` pass for
+  hardware-independent invariants.
+- `caliper._core` extension module exposing `schema_version`, `core_version`,
+  `default_record_json`, `normalize_record_json`, and `validate_record_json`.
+- Python `caliper.Result`: a dict-backed handle over the Rust schema, plus
+  `caliper.schema_version()` and the `caliper` CLI entry point (`--version`,
+  `--help`).
+- Continuous integration: a Rust lane (`cargo fmt --check`, `clippy -D warnings`,
+  `cargo test`) and a Python lane (Ruff, Mypy, `l0`/`l1` tests, wheel build)
+  across Python 3.10-3.12.

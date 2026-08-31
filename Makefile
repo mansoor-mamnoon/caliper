@@ -1,13 +1,26 @@
-.PHONY: install lint format typecheck test check build clean
+.PHONY: install develop rust-fmt rust-lint rust-test lint fmt typecheck test check build clean
 
 install:
 	pip install -e ".[dev]"
+
+develop:
+	maturin develop
+
+rust-fmt:
+	cargo fmt --all --check
+
+rust-lint:
+	cargo clippy --all-targets --all-features -- -D warnings
+
+rust-test:
+	cargo test --all
 
 lint:
 	ruff check .
 	ruff format --check .
 
-format:
+fmt:
+	cargo fmt --all
 	ruff check --fix .
 	ruff format .
 
@@ -17,11 +30,11 @@ typecheck:
 test:
 	pytest -m "l0 or l1"
 
-check: lint typecheck test
+check: rust-fmt rust-lint rust-test lint typecheck test
 
 build:
-	python -m build
+	maturin build --release
 
 clean:
-	rm -rf build dist .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
+	rm -rf target build dist .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +

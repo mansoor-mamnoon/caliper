@@ -16,9 +16,9 @@ right by default, and reports enough context alongside each number
 that you can tell whether to trust it.
 
 > **Status: early development.** This repository currently contains the project
-> scaffold, the result schema, and continuous integration. The measurement
-> engine is being built next. APIs and output formats will change until the
-> first tagged release.
+> scaffold: a Rust measurement core, its Python bindings, the result schema, and
+> continuous integration. The measurement engine is being built next. APIs and
+> output formats will change until the first tagged release.
 
 ## What it will do
 
@@ -30,9 +30,9 @@ that you can tell whether to trust it.
   two events instead of synchronising after each one, so a 5-microsecond kernel
   isn't reported as 50.
 - **Explain the number** -- achieved throughput vs. the hardware roofline for the
-  dtype, arithmetic intensity, whether the kernel is compute- or
-  memory-bound, register and shared-memory usage, spill counts, occupancy, and
-  the CPU-side launch overhead.
+  dtype, arithmetic intensity, whether the kernel is compute- or memory-bound,
+  register and shared-memory usage, spill counts, occupancy, and the CPU-side
+  launch overhead.
 - **Sweep a matrix** -- run one kernel across shapes, dtypes, memory layouts, and
   autotune configurations and write a stable, machine-readable results file.
 - **Catch regressions** -- compare two results files and flag the ones that moved
@@ -41,6 +41,18 @@ that you can tell whether to trust it.
 - **Check itself** -- a `selftest` command validates an install against
   on-device reference workloads whose correct answers are known from first
   principles, and cross-checks against Nsight Systems where it's available.
+
+## How it's built
+
+| Layer | Language | What lives here |
+| --- | --- | --- |
+| `crates/caliper-core` | Rust | All measurement logic: the result schema, statistics, the roofline model, `ptxas` parsing, the regression threshold model. No GPU or Python dependency; tested with `cargo test`. |
+| `crates/caliper-ffi` | Rust (PyO3) | A thin binding layer that exposes the core to Python as `caliper._core`. |
+| GPU layer *(coming)* | Rust + a small amount of CUDA C++ | Kernel launch, CUDA events and graphs, NVML clock control, and the on-device reference kernels. |
+| `python/caliper` | Python | The public API, the command-line tool, and the Triton-compatible `do_bench` shim. |
+
+The full interface, data schema, and validation strategy are written up in
+[`caliper-4-week-plan.md`](caliper-4-week-plan.md).
 
 ## Planned interface
 
@@ -59,36 +71,39 @@ caliper compare --baseline a.parquet --candidate b.parquet
 caliper selftest         # validate this install against on-device references
 ```
 
-The full interface, data schema, and validation strategy are written up in
-[`caliper-4-week-plan.md`](caliper-4-week-plan.md).
-
 ## Install
 
-Not yet published. For development:
+Not yet published. For development you need a Rust toolchain
+([rustup](https://rustup.rs)) and Python 3.10-3.12:
 
 ```bash
 git clone https://github.com/mansoor-mamnoon/caliper
 cd caliper
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"      # builds the Rust extension via maturin
 ```
 
-The library targets Linux with an NVIDIA GPU (CUDA 12.1+) and Python
-3.10-3.12. The pure computation and schema code has no GPU dependency and its
-tests run anywhere.
+The library targets Linux with an NVIDIA GPU (CUDA 12.1+). The core and its
+tests have no GPU dependency and run anywhere.
 
 ## Development
 
 ```bash
-make lint        # ruff
-make typecheck   # mypy
-make test        # pytest -m "l0 or l1"   (no GPU needed)
-make check       # all of the above
+make check     # cargo fmt + clippy + cargo test, then ruff + mypy + pytest
+```
+
+or individually:
+
+```bash
+make rust-test    # cargo test --all
+make test         # pytest -m "l0 or l1"   (no GPU needed)
+make lint         # ruff
+make typecheck    # mypy
 ```
 
 Tests are tagged by what they need: `l0` (pure, no GPU), `l1` (against recorded
 device responses, no GPU), and `l2`/`l3`/`l4`/`l6` (require a real GPU). CI runs
-`l0` and `l1` on every push.
+the Rust suite and the `l0`/`l1` Python tests on every push.
 
 ## License
 
