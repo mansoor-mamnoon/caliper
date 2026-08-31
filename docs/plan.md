@@ -577,7 +577,7 @@ Tier-1 archs must be all-PASS to release; Tier-2 archs are filed with triage not
 | 1 | Install clean | `python -m venv v && v/bin/pip install caliper-gpu` | no errors; `caliper --version` prints v0.3.0 | |
 | 2 | Doctor | `caliper doctor --json` | verdict present; every field cross-checks vs `nvidia-smi -q` (fill the fingerprint checklist) | |
 | 3 | Selftest | `caliper selftest --full --report r.json` | exit 0; 9/9 (or 8/8 + SKIP if no nsys); `r.json` validates | |
-| 4 | Duration linearity | `caliper bench corpus:o1 --sweep-ns 1000,2000,5000,10000,50000,200000,1000000,10000000 --json o1.json` | linear fit slope ∈ [0.97,1.03]; plot attached | |
+| 4 | Duration linearity | `caliper selftest --full` (its O1 check sweeps `target_ns ∈ {1µs … 10ms}` and runs `check_o1_linearity`) — see the `selftest` report's `o1_duration_linearity` entry | linear fit slope ∈ [0.97,1.03]; report attached | |
 | 5 | L2 flush A/B | `caliper bench corpus:o2 --bytes $((L2/2)) --flush-l2` vs `--no-flush-l2`; then `--bytes $((L2*4))` both ways | small: ≥ 2× GB/s gap; large: < 5% gap | |
 | 6 | Bandwidth cross-check | build `nvbandwidth`, run `./nvbandwidth -t device_to_device_memcpy_read_ce`; compare to O2 at matched size | within 5% | |
 | 7 | cuBLAS vs ncu | `caliper bench corpus:gemm --shapes '{M:4096,N:4096,K:4096}' --dtype bf16 --json g.json`; `ncu --set full -k <k> ...` | duration Δ ≤ 3%; registers exact; occupancy ± 0.05; TFLOP/s Δ ≤ 3% (fill the table) | |
@@ -684,9 +684,11 @@ each proven against O1/O2/O4 and (manually) against `nsys`.
   `notebooks/dev.ipynb` (git pull → `pip install -e .[dev]` → `pytest -m "l2 or
   l6"` → tail failures) and `make sync`.
   **Week-1 gate demo (on Colab — A100 or T4):** `caliper doctor` + `caliper bench
-  corpus:o1 --sweep-ns ...`; run `nsys profile --stats=true` on O1@200µs and
-  O2@1GB and record Δ (must be ≤ 3% → NFR-1). Commit `tests/fixtures/*` captured
-  via `CALIPER_PORTS=record` **from the Colab session** (the Mac cannot record
+  corpus:o1 --recording <captured>.jsonl` (a single point); the O1 *sweep* +
+  `check_o1_linearity` runs under `caliper selftest --full` (W2D5). Run `nsys
+  profile --stats=true` on O1@200µs and O2@1GB and record Δ (must be ≤ 3% →
+  NFR-1). Commit `crates/caliper-gpu/fixtures/*` captured via
+  `CALIPER_GPU_PORTS=record` **from the Colab session** (the Mac cannot record
   them).
 
 **Week-1 acceptance gate (all must hold):**

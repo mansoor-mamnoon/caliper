@@ -67,6 +67,16 @@ def test_cuda_graph_mode_is_accepted() -> None:
         bench(recording=_rec("happy.jsonl"), batches=40, cuda_graph="sometimes")
 
 
+def test_corpus_target_sets_the_kernel_key() -> None:
+    r = bench("corpus:o1", recording=_rec("oracle_o1.jsonl"), batches=40)
+    assert r.kernel["name"] == "oracle:busy"
+
+
+def test_unknown_corpus_target_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown corpus target"):
+        bench("corpus:o9", recording=_rec("oracle_o1.jsonl"), batches=40)
+
+
 def test_bench_without_a_recording_is_not_implemented_yet() -> None:
     with pytest.raises(NotImplementedError):
         bench(lambda: None)

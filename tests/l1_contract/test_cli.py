@@ -41,11 +41,31 @@ def test_bench_without_a_recording_exits_two(capsys: pytest.CaptureFixture[str])
 
 
 def test_bench_replays_a_recording(capsys: pytest.CaptureFixture[str]) -> None:
-    code = main(
-        ["bench", "corpus:o1", "--recording", str(BENCH / "happy.jsonl"), "--batches", "40"]
-    )
+    code = main(["bench", "k", "--recording", str(BENCH / "happy.jsonl"), "--batches", "40"])
     assert code == 0
     assert "p50" in capsys.readouterr().out
+
+
+def test_bench_corpus_target_resolves(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(
+        [
+            "bench",
+            "corpus:o1",
+            "--recording",
+            str(BENCH / "oracle_o1.jsonl"),
+            "--batches",
+            "40",
+            "--json",
+        ]
+    )
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["kernel"]["name"] == "oracle:busy"
+
+
+def test_bench_unknown_corpus_target_exits_two(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["bench", "corpus:o9", "--recording", str(BENCH / "oracle_o1.jsonl")])
+    assert code == 2
+    assert "unknown corpus target" in capsys.readouterr().err
 
 
 def test_bench_json_output(capsys: pytest.CaptureFixture[str]) -> None:
@@ -66,7 +86,18 @@ def test_bench_bad_warmup_exits_two(capsys: pytest.CaptureFixture[str]) -> None:
 def test_doctor_fit_recording_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
     code = main(["doctor", "--recording", str(DOCTOR / "fit.jsonl")])
     assert code == 0
-    assert "FIT" in capsys.readouterr().out.upper()
+    assert "FIT TO BENCHMARK" in capsys.readouterr().out
+
+
+def test_doctor_constrained_text_matches_the_honest_degradation_spec(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(["doctor", "--recording", str(DOCTOR / "constrained.jsonl")])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "FIT TO BENCHMARK (reduced confidence)" in out
+    assert "constrained (Colab-like)" in out
+    assert "clocks-unlocked" in out
 
 
 def test_doctor_throttling_recording_exits_one(capsys: pytest.CaptureFixture[str]) -> None:

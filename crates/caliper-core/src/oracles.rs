@@ -132,6 +132,10 @@ pub fn check_o1_point(target_ns: f64, measured_us: f64) -> OracleCheck {
 
 /// Check that a full O1 sweep is linear with unit slope. `points` are
 /// `(expected_us, measured_us)`.
+///
+/// Only the slope gates the pass/fail (Appendix A: `slope ∈ [0.97, 1.03]`). The
+/// fitted intercept is reported in `detail` — it should be close to the launch
+/// overhead, but pinning that number is [`check_o4_launch_overhead`]'s job.
 #[must_use]
 pub fn check_o1_linearity(points: &[(f64, f64)]) -> OracleCheck {
     match fit_line(points) {
@@ -276,17 +280,22 @@ pub fn check_o4_launch_overhead(eager_us: f64, graph_us: f64, nsys_gap_us: f64) 
 
 // --- O6: throttle detection ---------------------------------------------------
 
-/// Check O6: inducing throttle drops samples and reports reasons.
+/// Check O6: inducing throttle drops samples and reports a power/thermal reason
+/// (Appendix A: `SW_POWER_CAP` or an `HW_*` / thermal token).
 #[must_use]
 pub fn check_o6_throttle(invalidated_samples: u64, throttle_reasons: &[String]) -> OracleCheck {
-    let passed = invalidated_samples > 0 && !throttle_reasons.is_empty();
+    let power_or_thermal = throttle_reasons.iter().any(|r| {
+        let u = r.to_uppercase();
+        u.contains("POWER") || u.contains("THERMAL") || u.starts_with("HW_")
+    });
+    let passed = invalidated_samples > 0 && power_or_thermal;
     OracleCheck::boolean(
         "o6_throttle",
         passed,
         invalidated_samples as f64,
         format!(
-            "{invalidated_samples} sample(s) dropped, reasons {:?} (want > 0 and non-empty)",
-            throttle_reasons
+            "{invalidated_samples} sample(s) dropped, reasons {throttle_reasons:?} \
+             (want > 0 and a power/thermal reason)"
         ),
     )
 }
@@ -376,9 +385,11 @@ mod tests {
     }
 
     #[test]
-    fn o6_needs_dropped_samples_and_reasons() {
+    fn o6_needs_dropped_samples_and_a_power_or_thermal_reason() {
         assert!(check_o6_throttle(214, &["SW_POWER_CAP".to_string()]).passed);
-        assert!(!check_o6_throttle(0, &["SW_POWER_CAP".to_string()]).passed);
-        assert!(!check_o6_throttle(10, &[]).passed);
+        assert!(check_o6_throttle(5, &["HW_THERMAL_SLOWDOWN".to_string()]).passed);
+        assert!(!check_o6_throttle(0, &["SW_POWER_CAP".to_string()]).passed); // nothing dropped
+        assert!(!check_o6_throttle(10, &[]).passed); // no reason
+        assert!(!check_o6_throttle(10, &["GpuIdle".to_string()]).passed); // benign reason
     }
 }

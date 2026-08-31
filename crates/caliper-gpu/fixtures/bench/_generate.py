@@ -67,11 +67,12 @@ def time_batches(
     wall: list[float],
     throttled: list[bool],
     reasons: list[str],
+    kernel_key: str = "kernel",
 ) -> str:
     return ok(
         "kernel_launcher",
         "time_batches",
-        {"kernel_key": "kernel", "batch": 32, "batches": n, "use_graph": False},
+        {"kernel_key": kernel_key, "batch": 32, "batches": n, "use_graph": False},
         {
             "gpu_us": gpu,
             "wall_us": wall,
@@ -199,7 +200,27 @@ def trailing_call() -> None:
     )
 
 
+def oracle_o1() -> None:
+    # A clean locked run of the O1 `busy` oracle at ~200 us/launch, keyed so
+    # `caliper bench corpus:o1 --recording bench/oracle_o1.jsonl` matches.
+    n = 40
+    gpu = [round(6400.0 + 3.0 * math.sin(i / 2.0), 3) for i in range(n)]
+    wall = [round(g + 320.0, 3) for g in gpu]
+    write(
+        "oracle_o1.jsonl",
+        [
+            snapshot(),
+            ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
+            time_batches(n, gpu, wall, [], [], kernel_key="oracle:busy"),
+            ok("gpu_clock", "throttle_reasons", None, []),
+            read(2520, True),
+            ok("gpu_clock", "unlock", None, None),
+        ],
+    )
+
+
 if __name__ == "__main__":
-    for f in (happy, unlocked_throttled, cold_ramp, lock_error, trailing_call):
+    for f in (happy, unlocked_throttled, cold_ramp, lock_error, trailing_call, oracle_o1):
         f()
-    print("wrote happy, unlocked_throttled, cold_ramp, lock_error, trailing_call")
+    print("wrote happy, unlocked_throttled, cold_ramp, lock_error, trailing_call, oracle_o1")

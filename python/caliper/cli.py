@@ -15,7 +15,6 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from caliper import __version__, api
 
@@ -100,14 +99,15 @@ def _cmd_bench(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
+    text = _recording_text(args)
     try:
-        report = api.doctor(recording=_recording_text(args))
+        report = api.doctor(recording=text)
+        rendered = api.doctor_text(recording=text)
     except (ValueError, OSError) as exc:
         print(f"caliper doctor: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(report, indent=2) if args.json else _render_doctor(report))
-    code = int(report.get("exit_code", 2))
-    return code
+    print(json.dumps(report, indent=2) if args.json else rendered)
+    return int(report.get("exit_code", 2))
 
 
 def _cmd_fingerprint(args: argparse.Namespace) -> int:
@@ -126,19 +126,6 @@ def _cmd_fingerprint(args: argparse.Namespace) -> int:
 
 def _recording_text(args: argparse.Namespace) -> str | None:
     return Path(args.recording).read_text() if args.recording else None
-
-
-def _render_doctor(report: dict[str, Any]) -> str:
-    lines = [
-        "caliper doctor",
-        f"  verdict:     {report['verdict']}",
-        f"  environment: {report['environment']}",
-    ]
-    for check in report["checks"]:
-        lines.append(f"  [{check['status'].upper()}] {check['name']} -- {check['detail']}")
-    for note in report.get("notes", []):
-        lines.append(f"  note: {note}")
-    return "\n".join(lines)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

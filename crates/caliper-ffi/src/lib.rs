@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use caliper_core::{schema, stats, warmup};
 use caliper_gpu::fixture::FixturePlayer;
-use caliper_gpu::{doctor as gpu_doctor, run_replay, BenchOpts, DeviceInfo};
+use caliper_gpu::{corpus, doctor as gpu_doctor, run_replay, BenchOpts, DeviceInfo};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -106,6 +106,24 @@ fn bench_replay(recording: &str, opts_json: &str) -> PyResult<String> {
     Ok(schema::to_json(&record))
 }
 
+// --- corpus targets ------------------------------------------------------
+
+/// The kernel key for a `corpus:*` target, or `None` if it is not a known
+/// oracle. `caliper bench corpus:o1` uses this.
+#[pyfunction]
+fn resolve_corpus_target(name: &str) -> Option<&'static str> {
+    corpus::resolve(name)
+}
+
+/// The built-in oracle targets as `(target, kernel_key, description)` triples.
+#[pyfunction]
+fn corpus_targets() -> Vec<(String, String, String)> {
+    corpus::ORACLE_TARGETS
+        .iter()
+        .map(|(t, k, d)| (t.to_string(), k.to_string(), d.to_string()))
+        .collect()
+}
+
 // --- doctor / fingerprint --------------------------------------------------
 
 /// Run `caliper doctor` against a recorded device session; returns the report
@@ -117,13 +135,31 @@ fn doctor_replay(recording: &str) -> PyResult<String> {
     Ok(gpu_doctor::run(&mut layer).to_json())
 }
 
+/// The same, rendered for a terminal (the canonical human format).
+#[pyfunction]
+fn doctor_render_replay(recording: &str) -> PyResult<String> {
+    let mut layer =
+        FixturePlayer::from_jsonl(recording).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(gpu_doctor::run(&mut layer).render())
+}
+
 /// Run `caliper doctor` against the backend selected by `CALIPER_GPU_PORTS`
 /// (default `real`; without the `cuda` build feature that is "no device").
 #[pyfunction]
 fn doctor_from_env() -> String {
+    doctor_report_from_env().to_json()
+}
+
+/// The same, rendered for a terminal.
+#[pyfunction]
+fn doctor_render_from_env() -> String {
+    doctor_report_from_env().render()
+}
+
+fn doctor_report_from_env() -> caliper_core::doctor::DoctorReport {
     match caliper_gpu::open_from_env() {
-        Ok(mut handle) => gpu_doctor::run(&mut handle).to_json(),
-        Err(_) => caliper_core::doctor::DoctorReport::no_device().to_json(),
+        Ok(mut handle) => gpu_doctor::run(&mut handle),
+        Err(_) => caliper_core::doctor::DoctorReport::no_device(),
     }
 }
 
@@ -163,8 +199,12 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(cross_pass_cov, module)?)?;
     module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
     module.add_function(wrap_pyfunction!(bench_replay, module)?)?;
+    module.add_function(wrap_pyfunction!(resolve_corpus_target, module)?)?;
+    module.add_function(wrap_pyfunction!(corpus_targets, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_replay, module)?)?;
+    module.add_function(wrap_pyfunction!(doctor_render_replay, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_from_env, module)?)?;
+    module.add_function(wrap_pyfunction!(doctor_render_from_env, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_replay, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_from_env, module)?)?;
     Ok(())

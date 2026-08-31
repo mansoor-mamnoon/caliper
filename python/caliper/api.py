@@ -85,6 +85,13 @@ def bench(
         assert fixture is not None
         recording = Path(fixture).read_text()
 
+    if isinstance(target, str) and target.startswith("corpus:"):
+        resolved = _core.resolve_corpus_target(target)
+        if resolved is None:
+            names = ", ".join(t[0] for t in _core.corpus_targets())
+            raise ValueError(f"unknown corpus target {target!r}; available: {names}")
+        kernel_key = resolved
+
     opts = {
         "kernel_key": kernel_key,
         "kernel_impl": kernel_impl,
@@ -124,6 +131,18 @@ def doctor(
     raw = _core.doctor_from_env() if text is None else _core.doctor_replay(text)
     report: dict[str, Any] = json.loads(raw)
     return report
+
+
+def doctor_text(
+    *,
+    fixture: str | Path | None = None,
+    recording: str | None = None,
+) -> str:
+    """The :func:`doctor` report rendered for a terminal (the canonical format)."""
+    text = _read(fixture, recording)
+    if text is None:
+        return _core.doctor_render_from_env()
+    return _core.doctor_render_replay(text)
 
 
 def fingerprint(

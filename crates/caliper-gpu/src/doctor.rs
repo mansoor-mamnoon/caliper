@@ -5,6 +5,7 @@
 
 use caliper_core::doctor::{assess, DoctorFacts, DoctorReport};
 
+use crate::error::GpuError;
 use crate::ports::{DeviceInfo, GpuClock};
 use crate::types::{ClockTarget, LockOutcome};
 
@@ -12,7 +13,10 @@ use crate::types::{ClockTarget, LockOutcome};
 ///
 /// The sequence is `snapshot`, a lock probe (`lock` then `unlock` if it took),
 /// and a throttle read. If `snapshot` fails, `device_found` is `false` and the
-/// rest is left unprobed.
+/// rest is left unprobed. A *permission* / *unsupported* lock failure is normal
+/// (a constrained box); any other device error is recorded in
+/// `DoctorFacts::probe_error` so `assess` can surface it, matching how
+/// [`crate::bench::run`] treats lock failures.
 pub fn gather<L: DeviceInfo + GpuClock + ?Sized>(layer: &mut L) -> DoctorFacts {
     let machine = match layer.snapshot() {
         Ok(m) => m,
@@ -25,15 +29,33 @@ pub fn gather<L: DeviceInfo + GpuClock + ?Sized>(layer: &mut L) -> DoctorFacts {
             Some(true)
         }
         Ok(LockOutcome::Denied | LockOutcome::Unsupported) => Some(false),
-        Err(_) => Some(false),
+        Err(GpuError::PermissionDenied(_) | GpuError::Unsupported(_)) => Some(false),
+        Err(e) => {
+            return DoctorFacts {
+                device_found: true,
+                probe_error: Some(format!("clock lock probe: {e}")),
+                ..DoctorFacts::default()
+            };
+        }
     };
 
-    let active_throttle = layer.throttle_reasons().unwrap_or_default();
+    let active_throttle = match layer.throttle_reasons() {
+        Ok(r) => r,
+        Err(e) => {
+            return DoctorFacts {
+                device_found: true,
+                clocks_lockable,
+                probe_error: Some(format!("throttle read: {e}")),
+                ..DoctorFacts::default()
+            };
+        }
+    };
 
     DoctorFacts {
         device_found: true,
         clocks_lockable,
         active_throttle,
+        probe_error: None,
         ecc_enabled: machine.ecc,
         mig: machine.mig,
         persistence_mode: machine.persistence_mode,
@@ -118,6 +140,23 @@ mod tests {
         let r = run(&mut p);
         assert_eq!(r.verdict, Verdict::Unfit);
         assert_eq!(r.exit_code, 1);
+    }
+
+    #[test]
+    fn a_hard_lock_error_during_probe_is_unfit_not_constrained() {
+        let jsonl = format!(
+            concat!(
+                r#"{{"port":"device_info","method":"snapshot","args":null,"ret":{{"Ok":{m}}}}}"#,
+                "\n",
+                r#"{{"port":"gpu_clock","method":"lock","args":{{"sm_mhz":null,"mem_mhz":null}},"ret":{{"Err":{{"Nvml":"NVML_ERROR_UNKNOWN"}}}}}}"#,
+            ),
+            m = M
+        );
+        let mut p = player(&jsonl);
+        let r = run(&mut p);
+        assert_eq!(r.verdict, Verdict::Unfit);
+        assert_eq!(r.exit_code, 1);
+        assert_eq!(r.checks[0].name, "device probe");
     }
 
     #[test]

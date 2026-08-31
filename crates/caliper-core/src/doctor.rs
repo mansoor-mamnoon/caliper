@@ -34,6 +34,9 @@ pub struct DoctorFacts {
     pub background_load_mib: Option<u64>,
     /// Whether performance counters (ncu-class) are available.
     pub counters_available: Option<bool>,
+    /// A non-permission device error hit while probing (e.g. an NVML fault).
+    /// `Some` means the probe could not complete and the box is not fit.
+    pub probe_error: Option<String>,
 }
 
 /// Overall fitness verdict.
@@ -166,6 +169,19 @@ impl DoctorReport {
 pub fn assess(facts: &DoctorFacts) -> DoctorReport {
     if !facts.device_found {
         return DoctorReport::no_device();
+    }
+    if let Some(err) = &facts.probe_error {
+        return DoctorReport {
+            verdict: Verdict::Unfit,
+            environment: Environment::Constrained,
+            checks: vec![check(
+                "device probe",
+                CheckStatus::Fail,
+                &format!("could not probe the device: {err}"),
+            )],
+            notes: vec![],
+            exit_code: 1,
+        };
     }
 
     let mut checks = Vec::new();
@@ -321,6 +337,7 @@ mod tests {
             persistence_mode: Some(true),
             background_load_mib: Some(0),
             counters_available: Some(true),
+            probe_error: None,
         }
     }
 
@@ -339,6 +356,17 @@ mod tests {
         let r = assess(&DoctorFacts::default());
         assert_eq!(r.verdict, Verdict::Error);
         assert_eq!(r.exit_code, 2);
+        assert_eq!(r.checks[0].status, CheckStatus::Fail);
+    }
+
+    #[test]
+    fn a_probe_error_is_unfit_not_a_benign_constrained() {
+        let mut f = healthy();
+        f.probe_error = Some("NVML_ERROR_UNKNOWN".to_string());
+        let r = assess(&f);
+        assert_eq!(r.verdict, Verdict::Unfit);
+        assert_eq!(r.exit_code, 1);
+        assert_eq!(r.checks[0].name, "device probe");
         assert_eq!(r.checks[0].status, CheckStatus::Fail);
     }
 

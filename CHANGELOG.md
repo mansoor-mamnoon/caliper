@@ -78,7 +78,9 @@ tagged release onward.
   `doctor::gather` / `doctor::run` over a device layer.
 - CLI: real `caliper bench` (recorded-session path, `--json`, `--warmup`,
   `--cuda-graph`, `--no-flush-l2`, `--no-lock-clocks`), `caliper doctor`
-  (exit 0 fit / 1 unfit / 2 error), and `caliper fingerprint`. `corpus:o1..o6`
-  resolve to the built-in oracle kernels.
+  (exit 0 fit / 1 unfit / 2 error; the non-`--json` output follows the
+  honest-degradation wording of the plan), and `caliper fingerprint`.
+  `caliper bench corpus:o1..o4, o6` resolves the target to the built-in oracle
+  kernel key; an unknown `corpus:*` target is rejected.
 - `caliper.doctor()` / `caliper.fingerprint()` Python entry points.
 - `notebooks/dev.ipynb` (the Colab "GPU CI") and `make sync`.
