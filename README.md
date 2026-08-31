@@ -52,7 +52,7 @@ that you can tell whether to trust it.
 | `python/caliper` | Python | The public API, the command-line tool, and the Triton-compatible `do_bench` shim. |
 
 The full interface, data schema, and validation strategy are written up in
-[`caliper-4-week-plan.md`](caliper-4-week-plan.md).
+[`docs/plan.md`](docs/plan.md).
 
 ## Planned interface
 
