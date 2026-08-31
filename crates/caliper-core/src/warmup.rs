@@ -11,8 +11,11 @@
 //! walk forward and return the first index whose trailing window has a median
 //! within `tol` (relative) of that reference.
 
+use serde::{Deserialize, Serialize};
+
 /// Options for [`steady_state`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct WarmupOpts {
     /// Size of the trailing window whose median is compared to the reference.
     pub window: usize,

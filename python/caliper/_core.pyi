@@ -20,3 +20,6 @@ def steady_state_index(
     tol: float = ...,
     min_warm: int = ...,
 ) -> tuple[int, bool]: ...
+
+# bench
+def bench_replay(recording: str, opts_json: str, /) -> str: ...

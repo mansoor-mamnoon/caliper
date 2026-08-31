@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use caliper_core::{schema, stats, warmup};
+use caliper_gpu::{run_replay, BenchOpts};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -91,6 +92,19 @@ fn steady_state_index(times: Vec<f64>, window: usize, tol: f64, min_warm: usize)
     (w.start, w.converged)
 }
 
+// --- bench ----------------------------------------------------------------
+
+/// Run `bench()` against a recorded device session. `opts_json` is a JSON
+/// [`BenchOpts`]. Returns the assembled record as canonical JSON. Raises
+/// ``ValueError`` on bad options, a malformed recording, or a reduction failure.
+#[pyfunction]
+fn bench_replay(recording: &str, opts_json: &str) -> PyResult<String> {
+    let opts: BenchOpts = serde_json::from_str(opts_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid bench options: {e}")))?;
+    let record = run_replay(recording, &opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(schema::to_json(&record))
+}
+
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", schema::CALIPER_VERSION)?;
@@ -102,5 +116,6 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(summarize, module)?)?;
     module.add_function(wrap_pyfunction!(cross_pass_cov, module)?)?;
     module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
+    module.add_function(wrap_pyfunction!(bench_replay, module)?)?;
     Ok(())
 }

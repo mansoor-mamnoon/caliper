@@ -27,6 +27,14 @@ pub struct RawSamples {
     pub wall_us: Vec<f64>,
     /// Launches per batch, echoed back so callers can convert to per-launch.
     pub batch: u32,
+    /// Per-batch throttle flag: `throttled[i]` is true if the GPU was throttling
+    /// while batch `i` was timed. Empty means the launcher observed no
+    /// throttling.
+    #[serde(default)]
+    pub throttled: Vec<bool>,
+    /// Union of throttle reasons (NVML names) observed while timing.
+    #[serde(default)]
+    pub throttle_reasons: Vec<String>,
 }
 
 /// A clock-lock request. `None` means "leave this clock alone / use the max".

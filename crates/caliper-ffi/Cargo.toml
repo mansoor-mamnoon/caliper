@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 caliper-core = { path = "../caliper-core" }
+caliper-gpu = { path = "../caliper-gpu" }
 serde_json = { workspace = true }
 pyo3 = { version = "0.24", features = ["extension-module"] }
 

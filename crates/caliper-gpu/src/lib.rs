@@ -14,6 +14,7 @@
 //! `caliper-core` depends on none of this — it never touches hardware. Only the
 //! orchestration above the ports does.
 
+pub mod bench;
 pub mod error;
 pub mod fixture;
 pub mod ports;
@@ -22,6 +23,7 @@ pub mod types;
 #[cfg(feature = "cuda")]
 pub mod real;
 
+pub use bench::{run, run_replay, BenchOpts, DeviceLayer};
 pub use error::{GpuError, Result};
 pub use ports::{DeviceInfo, GpuClock, KernelLauncher};
 pub use types::{ClockState, ClockTarget, LaunchSpec, LockOutcome, RawSamples};

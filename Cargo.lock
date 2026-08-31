@@ -27,6 +27,7 @@ name = "caliper-ffi"
 version = "0.0.1"
 dependencies = [
  "caliper-core",
+ "caliper-gpu",
  "pyo3",
  "serde_json",
 ]

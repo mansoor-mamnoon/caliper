@@ -1,0 +1,86 @@
+//! L1: `bench()` end to end over a recorded device session, no GPU.
+
+use std::path::PathBuf;
+
+use caliper_gpu::{run_replay, BenchOpts, GpuError};
+
+fn fixture(name: &str) -> String {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures/bench")
+        .join(name);
+    std::fs::read_to_string(p).expect("fixture reads")
+}
+
+fn opts(batches: u32) -> BenchOpts {
+    BenchOpts {
+        batches,
+        ..BenchOpts::default()
+    }
+}
+
+#[test]
+fn happy_run_produces_a_populated_locked_record() {
+    let rec = run_replay(&fixture("happy.jsonl"), &opts(40)).unwrap();
+
+    let t = &rec.timing;
+    assert!(
+        (198.0..202.0).contains(&t.p50_us.unwrap()),
+        "{:?}",
+        t.p50_us
+    );
+    assert!(t.p10_us.unwrap() <= t.p50_us.unwrap());
+    assert!(t.p50_us.unwrap() <= t.p90_us.unwrap());
+    assert!((8.0..12.0).contains(&t.launch_overhead_us.unwrap()));
+    assert_eq!(t.invalidated_samples, Some(0));
+    assert_eq!(t.n_warmup_to_steady, Some(0));
+    assert_eq!(t.n_samples, Some(40));
+
+    assert!(rec.flags.is_empty(), "unexpected flags: {:?}", rec.flags);
+    assert_eq!(rec.clocks.locked, Some(true));
+    assert_eq!(rec.clocks.sm_mhz, Some(2520));
+    assert_eq!(rec.machine.sm_arch.as_deref(), Some("sm_89"));
+    assert_eq!(rec.machine.l2_bytes, Some(75_497_472));
+    assert_eq!(rec.kernel.name.as_deref(), Some("kernel"));
+    assert_eq!(rec.schema_version, "1");
+}
+
+#[test]
+fn unlocked_run_with_throttling_is_flagged_and_cleaned() {
+    let rec = run_replay(&fixture("unlocked_throttled.jsonl"), &opts(40)).unwrap();
+
+    assert_eq!(rec.timing.invalidated_samples, Some(2));
+    assert_eq!(rec.timing.n_samples, Some(38));
+    // the two 20000 us outliers were dropped, so p50 is back at ~200/launch
+    assert!((198.0..202.0).contains(&rec.timing.p50_us.unwrap()));
+    assert_eq!(rec.throttle_reasons, vec!["SW_POWER_CAP".to_string()]);
+
+    let f = &rec.flags;
+    assert!(f.contains(&"clocks-unlocked".to_string()), "{f:?}");
+    assert!(
+        f.contains(&"throttled-samples-dropped".to_string()),
+        "{f:?}"
+    );
+    assert_eq!(rec.clocks.locked, Some(false));
+}
+
+#[test]
+fn cold_ramp_run_is_trimmed_to_steady_state() {
+    let rec = run_replay(&fixture("cold_ramp.jsonl"), &opts(70)).unwrap();
+
+    let start = rec.timing.n_warmup_to_steady.unwrap();
+    assert!(
+        start > 0,
+        "expected the ramp to be trimmed, start = {start}"
+    );
+    assert!(rec.timing.n_samples.unwrap() < 70);
+    assert!((198.0..203.0).contains(&rec.timing.p50_us.unwrap()));
+    assert!(!rec.flags.contains(&"warmup-not-converged".to_string()));
+}
+
+#[test]
+fn a_recording_with_leftover_calls_is_an_error() {
+    // Ask for fewer batches than the recording's launch args say -> arg mismatch,
+    // surfaced before we ever get to "leftover calls".
+    let err = run_replay(&fixture("happy.jsonl"), &opts(10)).unwrap_err();
+    assert!(matches!(err, GpuError::FixtureMismatch { .. }), "{err:?}");
+}

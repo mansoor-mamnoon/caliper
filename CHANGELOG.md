@@ -38,3 +38,14 @@ tagged release onward.
   recording, and seed fixtures. The on-device implementations in `real` (behind
   the `cuda` feature) are typed stubs for now; they are filled in and validated
   on a CUDA host.
+- `caliper_core::pipeline` -- `reduce()`, the pure heart of `bench()`: invalidate
+  throttled batches, trim to steady state, convert per-batch to per-launch,
+  summarise, and set advisory flags (`clocks-unlocked`,
+  `throttled-samples-dropped`, `l2-flush-disabled`, `warmup-not-converged`).
+  Plus `invalidate()` and `flush_buffer_bytes()` (L2-flush buffer sized from the
+  device's L2, not a fixed 256 MiB constant).
+- `caliper_gpu::bench` -- `run()` drives a device layer through one measurement
+  (snapshot -> lock -> time -> read -> unlock -> reduce); `run_replay()` does it
+  from a recorded session. Exposed to Python as `caliper.bench(recording=...)`,
+  which returns a populated `Result`; passing a live kernel is not supported yet
+  (needs the on-device launcher).
