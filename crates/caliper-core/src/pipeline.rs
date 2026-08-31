@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::schema::{Clocks, KernelLabel, Machine, Record};
 use crate::stats::{summarize, Summary};
-use crate::warmup::{steady_state, WarmupOpts};
+use crate::warmup::WarmupPlan;
 
 /// The 2 MiB granularity the flush buffer is aligned to.
 pub const FLUSH_GRANULARITY: u64 = 2 * 1024 * 1024;
@@ -100,8 +100,8 @@ pub struct ReduceInput {
     /// Throttle reasons observed while timing (NVML names).
     #[serde(default)]
     pub throttle_reasons: Vec<String>,
-    /// Steady-state detection options.
-    pub warmup: WarmupOpts,
+    /// How to handle warm-up: auto steady-state detection or a fixed trim.
+    pub warmup: WarmupPlan,
     /// Whether the L2 flush was performed between samples.
     pub flush_l2: bool,
     /// Whether the clocks were locked for the run.
@@ -174,7 +174,7 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
         return Err(PipelineError::AllInvalidated);
     }
 
-    let warm = steady_state(&kept.gpu_us, input.warmup);
+    let warm = input.warmup.resolve(&kept.gpu_us);
     let warm_gpu = &kept.gpu_us[warm.start..];
     let warm_wall = &kept.wall_us[warm.start..];
     if warm_gpu.is_empty() {
@@ -239,7 +239,7 @@ mod tests {
             batch: 32,
             throttled: Vec::new(),
             throttle_reasons: Vec::new(),
-            warmup: WarmupOpts::default(),
+            warmup: WarmupPlan::default(),
             flush_l2: true,
             clocks_locked: true,
             clocks: Clocks::default(),
@@ -332,6 +332,19 @@ mod tests {
         assert!(f.contains(&"throttled-samples-dropped".to_string()));
         assert!(f.contains(&"l2-flush-disabled".to_string()));
         // the 9999 outliers were dropped, so p50 is ~200/launch
+        assert!((199.0..201.0).contains(&rec.timing.p50_us.unwrap()));
+    }
+
+    #[test]
+    fn reduce_honours_a_fixed_warmup() {
+        let gpu: Vec<f64> = vec![6400.0; 40];
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+        let mut input = base_input(gpu, wall);
+        input.warmup = WarmupPlan::fixed(25);
+
+        let rec = reduce(input).unwrap();
+        assert_eq!(rec.timing.n_warmup_to_steady, Some(25));
+        assert_eq!(rec.timing.n_samples, Some(15));
         assert!((199.0..201.0).contains(&rec.timing.p50_us.unwrap()));
     }
 

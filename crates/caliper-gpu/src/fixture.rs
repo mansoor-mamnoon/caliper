@@ -47,12 +47,14 @@ pub struct FixturePlayer {
 }
 
 impl FixturePlayer {
-    /// Parse a recording from JSON Lines text. Blank lines are ignored.
+    /// Parse a recording from JSON Lines text. Blank lines and lines starting
+    /// with `#` (headers / comments, e.g. `# caliper-fixture v=0.0.1`) are
+    /// ignored.
     pub fn from_jsonl(text: &str) -> Result<Self> {
         let mut calls = VecDeque::new();
         for (i, line) in text.lines().enumerate() {
             let line = line.trim();
-            if line.is_empty() {
+            if line.is_empty() || line.starts_with('#') {
                 continue;
             }
             let call: Call = serde_json::from_str(line)
@@ -236,9 +238,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blank_lines_are_ignored() {
-        let jsonl =
-            "\n  \n{\"port\":\"gpu_clock\",\"method\":\"unlock\",\"ret\":{\"Ok\":null}}\n\n";
+    fn blank_and_comment_lines_are_ignored() {
+        let jsonl = concat!(
+            "# caliper-fixture v=0.0.1 arch=sm_89\n",
+            "\n  \n",
+            "{\"port\":\"gpu_clock\",\"method\":\"unlock\",\"ret\":{\"Ok\":null}}\n",
+            "\n",
+        );
         let p = FixturePlayer::from_jsonl(jsonl).unwrap();
         assert_eq!(p.remaining(), 1);
     }

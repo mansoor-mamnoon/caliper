@@ -45,7 +45,24 @@ tagged release onward.
   Plus `invalidate()` and `flush_buffer_bytes()` (L2-flush buffer sized from the
   device's L2, not a fixed 256 MiB constant).
 - `caliper_gpu::bench` -- `run()` drives a device layer through one measurement
-  (snapshot -> lock -> time -> read -> unlock -> reduce); `run_replay()` does it
-  from a recorded session. Exposed to Python as `caliper.bench(recording=...)`,
-  which returns a populated `Result`; passing a live kernel is not supported yet
-  (needs the on-device launcher).
+  (snapshot -> lock -> time -> throttle-poll -> read -> unlock -> reduce);
+  `run_replay()` does it from a recorded session, and requires the recording to
+  be fully consumed. A clock-lock refusal (including a hard `PermissionDenied`)
+  degrades to an unlocked, `clocks-unlocked`-tagged run rather than raising.
+  Exposed to Python as `caliper.bench(recording=...)`, which returns a populated
+  `Result`; passing a live kernel is not supported yet (needs the on-device
+  launcher).
+- Warm-up handling supports a fixed trim: `WarmupPlan { fixed: Some(n) }` /
+  `caliper.bench(warmup=25)` skips detection and drops exactly `n` leading
+  samples; `warmup="auto"` keeps steady-state detection.
+- `GraphMode` (`auto` / `on` / `off`) replaces the `cuda_graph` bool in
+  `BenchOpts` and `caliper.bench`; `auto` is resolved on-device.
+- `CALIPER_GPU_PORTS` (`real` / `fixture` / `record`) + `CALIPER_GPU_FIXTURE`
+  select the device backend at runtime via `caliper_gpu::open_from_env()` ->
+  `DeviceLayerHandle` (a concrete enum implementing every port).
+- `caliper.Result` gains the frozen read surface: `.p50_us` / `.p10_us` /
+  `.p90_us` / `.mad_us` / `.wall_p50_us` / `.launch_overhead_us` /
+  `.achieved_tflops` / `.flags` / `.throttle_reasons` / `.timing` / `.machine` /
+  `.ptxas` / etc.
+- Fixture recordings may carry `#`-prefixed header/comment lines
+  (`# caliper-fixture v=... arch=...`).

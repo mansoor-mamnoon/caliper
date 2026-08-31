@@ -89,6 +89,53 @@ impl DeviceInfo for NvmlDeviceInfo {
     }
 }
 
+/// The three real ports for one device, bundled so they satisfy
+/// [`crate::bench::DeviceLayer`].
+#[derive(Debug, Default)]
+pub struct CudaDeviceLayer {
+    launcher: CudaLauncher,
+    clock: NvmlClock,
+    info: NvmlDeviceInfo,
+}
+
+impl CudaDeviceLayer {
+    /// Open every port for `device`.
+    pub fn open(device: u32) -> Result<Self> {
+        Ok(Self {
+            launcher: CudaLauncher::open(device)?,
+            clock: NvmlClock::open(device)?,
+            info: NvmlDeviceInfo::open(device)?,
+        })
+    }
+}
+
+impl KernelLauncher for CudaDeviceLayer {
+    fn time_batches(&mut self, spec: &LaunchSpec) -> Result<RawSamples> {
+        self.launcher.time_batches(spec)
+    }
+}
+
+impl GpuClock for CudaDeviceLayer {
+    fn lock(&mut self, target: ClockTarget) -> Result<LockOutcome> {
+        self.clock.lock(target)
+    }
+    fn unlock(&mut self) -> Result<()> {
+        self.clock.unlock()
+    }
+    fn read(&mut self) -> Result<ClockState> {
+        self.clock.read()
+    }
+    fn throttle_reasons(&mut self) -> Result<Vec<String>> {
+        self.clock.throttle_reasons()
+    }
+}
+
+impl DeviceInfo for CudaDeviceLayer {
+    fn snapshot(&mut self) -> Result<Machine> {
+        self.info.snapshot()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

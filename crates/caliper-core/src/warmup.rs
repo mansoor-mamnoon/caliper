@@ -48,6 +48,48 @@ pub struct Warmup {
     pub converged: bool,
 }
 
+/// How a caller wants warm-up handled: auto-detect the steady state, or trim a
+/// fixed number of leading samples.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WarmupPlan {
+    /// Trim exactly this many leading samples and skip detection. `None` means
+    /// auto-detect with [`WarmupPlan::opts`].
+    pub fixed: Option<usize>,
+    /// Options for auto steady-state detection (ignored when `fixed` is set).
+    pub opts: WarmupOpts,
+}
+
+impl WarmupPlan {
+    /// Auto steady-state detection with the given options.
+    #[must_use]
+    pub fn auto(opts: WarmupOpts) -> Self {
+        Self { fixed: None, opts }
+    }
+
+    /// Trim a fixed `n` leading samples.
+    #[must_use]
+    pub fn fixed(n: usize) -> Self {
+        Self {
+            fixed: Some(n),
+            opts: WarmupOpts::default(),
+        }
+    }
+
+    /// Resolve this plan against a concrete series. A fixed warm-up is clamped so
+    /// at least one sample always remains.
+    #[must_use]
+    pub fn resolve(&self, times: &[f64]) -> Warmup {
+        match self.fixed {
+            Some(n) => Warmup {
+                start: n.min(times.len().saturating_sub(1)),
+                converged: true,
+            },
+            None => steady_state(times, self.opts),
+        }
+    }
+}
+
 /// Find the first warm sample index for `times`.
 ///
 /// Returns `Warmup { start: 0, converged: true }` for an empty or very short
@@ -185,6 +227,29 @@ mod tests {
             w.start > 25 && w.start < 210,
             "auto warm-up start was {} (a fixed warmup=25 would still be on cold clocks)",
             w.start
+        );
+    }
+
+    #[test]
+    fn warmup_plan_fixed_trims_exactly_n_and_is_clamped() {
+        let xs = vec![9.0; 50];
+        assert_eq!(
+            WarmupPlan::fixed(25).resolve(&xs),
+            Warmup {
+                start: 25,
+                converged: true
+            }
+        );
+        // clamped so at least one sample survives
+        assert_eq!(WarmupPlan::fixed(999).resolve(&xs).start, 49);
+    }
+
+    #[test]
+    fn warmup_plan_auto_matches_steady_state() {
+        let xs = ramp(50.0, 120.0, 40.0, 200, 40);
+        assert_eq!(
+            WarmupPlan::auto(WarmupOpts::default()).resolve(&xs),
+            steady_state(&xs, WarmupOpts::default())
         );
     }
 

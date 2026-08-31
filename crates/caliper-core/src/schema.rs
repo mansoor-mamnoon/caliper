@@ -261,23 +261,37 @@ impl Default for Record {
 
 /// Parse a [`Record`] from JSON. Lenient: unknown keys are ignored and missing
 /// sections use their defaults.
+///
+/// # Errors
+/// Returns the `serde_json` error if `s` is not valid JSON, or has a value of
+/// the wrong type for a known field.
 pub fn from_json(s: &str) -> Result<Record, serde_json::Error> {
     serde_json::from_str(s)
 }
 
 /// Serialise a [`Record`] to canonical, compact JSON (stable field and key
 /// order).
+///
+/// # Panics
+/// Never in practice: a [`Record`] holds only JSON-representable values, so
+/// `serde_json` serialisation cannot fail.
 pub fn to_json(record: &Record) -> String {
     serde_json::to_string(record).expect("Record always serialises")
 }
 
 /// Serialise a [`Record`] to canonical, indented JSON.
+///
+/// # Panics
+/// Never in practice; see [`to_json`].
 pub fn to_json_pretty(record: &Record) -> String {
     serde_json::to_string_pretty(record).expect("Record always serialises")
 }
 
 /// Parse then re-serialise, producing the canonical form of an arbitrary
 /// (possibly hand-written or older-schema) record document.
+///
+/// # Errors
+/// Returns the `serde_json` error if `s` does not parse as a record.
 pub fn normalize_json(s: &str) -> Result<String, serde_json::Error> {
     Ok(to_json(&from_json(s)?))
 }
@@ -347,6 +361,9 @@ pub fn validate(record: &Record) -> Vec<String> {
 
 /// Parse a record document and validate it. Parse errors surface as `Err`;
 /// schema problems come back in the `Ok` list.
+///
+/// # Errors
+/// Returns the `serde_json` error if `s` does not parse as a record.
 pub fn validate_json(s: &str) -> Result<Vec<String>, serde_json::Error> {
     Ok(validate(&from_json(s)?))
 }

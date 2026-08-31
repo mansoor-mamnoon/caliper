@@ -16,6 +16,27 @@ from typing import Any
 from caliper import _core
 from caliper._record import Result
 
+_GRAPH_MODES = ("auto", "on", "off")
+
+
+def _warmup_plan(warmup: str | int, window: int, tol: float, min_warm: int) -> dict[str, Any]:
+    opts = {"window": window, "tol": tol, "min_warm": min_warm}
+    if warmup == "auto":
+        return {"fixed": None, "opts": opts}
+    if isinstance(warmup, bool) or not isinstance(warmup, int):
+        raise ValueError(f"warmup must be 'auto' or an int, got {warmup!r}")
+    if warmup < 0:
+        raise ValueError(f"a fixed warmup must be non-negative, got {warmup}")
+    return {"fixed": warmup, "opts": opts}
+
+
+def _graph_mode(cuda_graph: str | bool) -> str:
+    if isinstance(cuda_graph, bool):
+        return "on" if cuda_graph else "off"
+    if cuda_graph not in _GRAPH_MODES:
+        raise ValueError(f"cuda_graph must be one of {_GRAPH_MODES} or a bool, got {cuda_graph!r}")
+    return cuda_graph
+
 
 def bench(
     target: Any = None,
@@ -27,11 +48,12 @@ def bench(
     dtype: str | None = None,
     batch: int = 32,
     batches: int = 50,
-    cuda_graph: bool = False,
+    cuda_graph: str | bool = "auto",
     flush_l2: bool = True,
     lock_clocks: bool = True,
     sm_mhz: int | None = None,
     mem_mhz: int | None = None,
+    warmup: str | int = "auto",
     warmup_window: int = 20,
     warmup_tol: float = 0.02,
     warmup_min: int = 30,
@@ -47,6 +69,11 @@ def bench(
         Path to a JSON Lines recording of a device session.
     recording:
         The text of such a recording (alternative to ``fixture``).
+    warmup:
+        ``"auto"`` for steady-state detection, or an ``int`` to trim exactly
+        that many leading samples.
+    cuda_graph:
+        ``"auto"`` / ``"on"`` / ``"off"`` (or a bool).
     """
     if recording is None and fixture is None:
         raise NotImplementedError(
@@ -64,10 +91,10 @@ def bench(
         "dtype": dtype,
         "batch": batch,
         "batches": batches,
-        "cuda_graph": cuda_graph,
+        "cuda_graph": _graph_mode(cuda_graph),
         "flush_l2": flush_l2,
         "lock_clocks": lock_clocks,
         "clock_target": {"sm_mhz": sm_mhz, "mem_mhz": mem_mhz},
-        "warmup": {"window": warmup_window, "tol": warmup_tol, "min_warm": warmup_min},
+        "warmup": _warmup_plan(warmup, warmup_window, warmup_tol, warmup_min),
     }
     return Result.from_json(_core.bench_replay(recording, json.dumps(opts)))

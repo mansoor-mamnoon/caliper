@@ -78,9 +78,46 @@ fn cold_ramp_run_is_trimmed_to_steady_state() {
 }
 
 #[test]
-fn a_recording_with_leftover_calls_is_an_error() {
-    // Ask for fewer batches than the recording's launch args say -> arg mismatch,
-    // surfaced before we ever get to "leftover calls".
+fn fewer_batches_than_recorded_is_an_arg_mismatch() {
+    // The recording's time_batches args say batches:40; asking for 10 -> mismatch.
     let err = run_replay(&fixture("happy.jsonl"), &opts(10)).unwrap_err();
     assert!(matches!(err, GpuError::FixtureMismatch { .. }), "{err:?}");
+}
+
+#[test]
+fn a_recording_with_a_leftover_call_is_rejected() {
+    let err = run_replay(&fixture("trailing_call.jsonl"), &opts(40)).unwrap_err();
+    match err {
+        GpuError::FixtureMismatch { expected, .. } => {
+            assert_eq!(expected, "recording fully consumed");
+        }
+        other => panic!("expected a 'fully consumed' mismatch, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_hard_lock_error_degrades_to_an_unlocked_run() {
+    let rec = run_replay(&fixture("lock_error.jsonl"), &opts(40)).unwrap();
+    assert!(
+        rec.flags.contains(&"clocks-unlocked".to_string()),
+        "{:?}",
+        rec.flags
+    );
+    assert_eq!(rec.clocks.locked, Some(false));
+    assert!((198.0..202.0).contains(&rec.timing.p50_us.unwrap()));
+}
+
+#[test]
+fn a_fixed_warmup_trims_exactly_n_batches() {
+    let rec = run_replay(
+        &fixture("happy.jsonl"),
+        &BenchOpts {
+            batches: 40,
+            warmup: caliper_core::WarmupPlan::fixed(12),
+            ..BenchOpts::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(rec.timing.n_warmup_to_steady, Some(12));
+    assert_eq!(rec.timing.n_samples, Some(28));
 }

@@ -58,6 +58,101 @@ class Result:
         """Human-readable schema problems; empty if the record is well-formed."""
         return list(_core.validate_record_json(json.dumps(self._data)))
 
+    # -- read accessors (the frozen public surface) -----------------------
+
+    def _section(self, name: str) -> dict[str, Any]:
+        section: dict[str, Any] = json.loads(json.dumps(self._data[name]))
+        return section
+
+    @property
+    def schema_version(self) -> str:
+        return str(self._data["schema_version"])
+
+    @property
+    def caliper_version(self) -> str:
+        return str(self._data["caliper_version"])
+
+    @property
+    def measured_at(self) -> str | None:
+        value = self._data["measured_at"]
+        return None if value is None else str(value)
+
+    @property
+    def flags(self) -> list[str]:
+        return list(self._data["flags"])
+
+    @property
+    def throttle_reasons(self) -> list[str]:
+        return list(self._data["throttle_reasons"])
+
+    @property
+    def timing(self) -> dict[str, Any]:
+        return self._section("timing")
+
+    @property
+    def roofline(self) -> dict[str, Any]:
+        return self._section("roofline")
+
+    @property
+    def ptxas(self) -> dict[str, Any]:
+        return self._section("ptxas")
+
+    @property
+    def occupancy(self) -> dict[str, Any]:
+        return self._section("occupancy")
+
+    @property
+    def clocks(self) -> dict[str, Any]:
+        return self._section("clocks")
+
+    @property
+    def machine(self) -> dict[str, Any]:
+        return self._section("machine")
+
+    @property
+    def kernel(self) -> dict[str, Any]:
+        return self._section("kernel")
+
+    @property
+    def p10_us(self) -> float | None:
+        value = self._data["timing"]["p10_us"]
+        return None if value is None else float(value)
+
+    @property
+    def p50_us(self) -> float | None:
+        value = self._data["timing"]["p50_us"]
+        return None if value is None else float(value)
+
+    @property
+    def p90_us(self) -> float | None:
+        value = self._data["timing"]["p90_us"]
+        return None if value is None else float(value)
+
+    @property
+    def mad_us(self) -> float | None:
+        value = self._data["timing"]["mad_us"]
+        return None if value is None else float(value)
+
+    @property
+    def wall_p50_us(self) -> float | None:
+        value = self._data["timing"]["wall_p50_us"]
+        return None if value is None else float(value)
+
+    @property
+    def launch_overhead_us(self) -> float | None:
+        value = self._data["timing"]["launch_overhead_us"]
+        return None if value is None else float(value)
+
+    @property
+    def achieved_tflops(self) -> float | None:
+        value = self._data["roofline"]["achieved_tflops"]
+        return None if value is None else float(value)
+
+    @property
+    def roofline_pct(self) -> float | None:
+        value = self._data["roofline"]["roofline_pct"]
+        return None if value is None else float(value)
+
     def __getitem__(self, key: str) -> Any:
         return self._data[key]
 

@@ -37,6 +37,21 @@ pub struct RawSamples {
     pub throttle_reasons: Vec<String>,
 }
 
+/// Whether to capture each timed batch into a CUDA graph and replay it, which
+/// removes per-launch overhead from the measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GraphMode {
+    /// Decide per kernel: capture a graph when a single launch is short enough
+    /// that launch overhead would dominate. (The decision is made on-device.)
+    #[default]
+    Auto,
+    /// Always capture a graph.
+    On,
+    /// Never capture a graph.
+    Off,
+}
+
 /// A clock-lock request. `None` means "leave this clock alone / use the max".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]

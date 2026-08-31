@@ -16,4 +16,4 @@ pub mod warmup;
 pub use pipeline::{flush_buffer_bytes, invalidate, reduce, PipelineError, ReduceInput};
 pub use schema::{Record, SCHEMA_VERSION};
 pub use stats::{cross_pass_cov, summarize, Summary};
-pub use warmup::{steady_state, Warmup, WarmupOpts};
+pub use warmup::{steady_state, Warmup, WarmupOpts, WarmupPlan};
