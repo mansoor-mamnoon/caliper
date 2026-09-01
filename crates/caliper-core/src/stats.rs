@@ -59,6 +59,25 @@ pub fn quantile_sorted(sorted: &[f64], q: f64) -> f64 {
     sorted[lo] * (1.0 - frac) + sorted[hi] * frac
 }
 
+/// The requested quantiles of `samples` (any order, unsorted), using the same
+/// linear interpolation as [`quantile_sorted`]. This is the reduction behind a
+/// Triton-style `do_bench(quantiles=...)` over a raw sample vector.
+///
+/// Returns `None` if `samples` is empty or has a non-finite value, or if any
+/// `q` is outside `0.0..=1.0`.
+#[must_use]
+pub fn quantiles(samples: &[f64], qs: &[f64]) -> Option<Vec<f64>> {
+    if samples.is_empty()
+        || samples.iter().any(|x| !x.is_finite())
+        || qs.iter().any(|q| !(0.0..=1.0).contains(q))
+    {
+        return None;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    Some(qs.iter().map(|&q| quantile_sorted(&sorted, q)).collect())
+}
+
 /// The median of an already-sorted, non-empty slice.
 ///
 /// # Panics
@@ -148,6 +167,18 @@ mod tests {
         close(quantile_sorted(&xs, 0.50), 5.5);
         close(quantile_sorted(&xs, 0.90), 9.1);
         close(quantile_sorted(&xs, 1.0), 10.0);
+    }
+
+    #[test]
+    fn quantiles_helper_sorts_and_rejects_bad_input() {
+        let xs = [7.0, 1.0, 10.0, 3.0, 5.0, 2.0, 8.0, 4.0, 9.0, 6.0];
+        let out = quantiles(&xs, &[0.5, 0.0, 1.0]).unwrap();
+        close(out[0], 5.5);
+        close(out[1], 1.0);
+        close(out[2], 10.0);
+        assert!(quantiles(&[], &[0.5]).is_none());
+        assert!(quantiles(&[1.0, f64::NAN], &[0.5]).is_none());
+        assert!(quantiles(&xs, &[1.5]).is_none());
     }
 
     #[test]

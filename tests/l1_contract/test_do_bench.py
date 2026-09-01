@@ -62,6 +62,8 @@ def test_a_bad_return_mode_is_rejected() -> None:
         do_bench(recording=_rec("happy.jsonl"), return_mode="p99")
 
 
-def test_a_live_callable_without_a_recording_is_not_implemented_yet() -> None:
-    with pytest.raises(NotImplementedError):
+def test_a_live_callable_needs_torch_and_cuda() -> None:
+    # No CUDA on the dev box: the live path must degrade to a clear error, not
+    # crash. (The live timing loop itself is exercised on a CUDA host.)
+    with pytest.raises(NotImplementedError, match="CUDA"):
         do_bench(lambda: None)

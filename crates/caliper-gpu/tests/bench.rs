@@ -158,11 +158,41 @@ fn auto_graph_run_is_tagged_and_a_roofline_spec_is_recorded() {
         "{:?}",
         rec.flags
     );
-    // sm_89 has no bf16 tensor peak? it does (165.2). roofline section is filled.
+    // sm_89 has a bf16 tensor peak (165.2), so the roofline section is filled.
     assert!(rec.roofline.achieved_tflops.unwrap() > 0.0);
     assert!(rec.roofline.bound.is_some());
     assert!(rec.timing.mean_us.unwrap() > 0.0);
     assert!(rec.timing.min_us.unwrap() <= rec.timing.max_us.unwrap());
+}
+
+#[test]
+fn auto_graph_falls_back_to_eager_above_the_threshold() {
+    // single_launch_us = 210 us, no graph_used report -> policy says eager.
+    let rec = run_replay(&fixture("graph_eager.jsonl"), &opts(40)).unwrap();
+    assert!(
+        rec.flags.contains(&"graph-eager".to_string()),
+        "{:?}",
+        rec.flags
+    );
+    assert!(!rec.flags.contains(&"graph-captured".to_string()));
+}
+
+#[test]
+fn an_explicit_off_without_a_launcher_report_is_not_flagged() {
+    let rec = run_replay(
+        &fixture("happy.jsonl"),
+        &BenchOpts {
+            batches: 40,
+            cuda_graph: caliper_gpu::GraphMode::Off,
+            ..BenchOpts::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        !rec.flags.iter().any(|f| f.starts_with("graph-")),
+        "{:?}",
+        rec.flags
+    );
 }
 
 #[test]

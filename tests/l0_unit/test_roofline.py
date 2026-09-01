@@ -95,9 +95,10 @@ def test_corpus_roofline_spec_infers_flop_and_byte_counts() -> None:
     assert _core.corpus_roofline_spec("corpus:gemm_bf16", json.dumps({"M": 4096}), None) is None
 
 
-def test_corpus_roofline_spec_rejects_a_non_object_shape() -> None:
+@pytest.mark.parametrize("bad", ["[1,2,3]", "{not json", "42", "null"])
+def test_corpus_roofline_spec_rejects_a_non_object_shape(bad: str) -> None:
     with pytest.raises(ValueError):
-        _core.corpus_roofline_spec("corpus:gemm_bf16", "[1,2,3]", None)
+        _core.corpus_roofline_spec("corpus:gemm_bf16", bad, None)
 
 
 def test_achieved_bandwidth_matches_the_o2_formula() -> None:

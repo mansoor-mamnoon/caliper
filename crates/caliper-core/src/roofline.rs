@@ -329,15 +329,30 @@ pub fn roofline_section(r: &RooflineResult) -> crate::schema::Roofline {
 
 /// Bytes per element for a dtype token; defaults to 4 (fp32) when unknown.
 fn dtype_bytes(dtype: &str) -> f64 {
+    if matches!(
+        dtype.trim().to_ascii_lowercase().as_str(),
+        "fp64" | "float64" | "f64" | "double"
+    ) {
+        return 8.0;
+    }
     match dtype_key(dtype) {
         "fp16" | "bf16" => 2.0,
         "fp8" => 1.0,
-        _ => 4.0, // fp32, tf32
+        _ => 4.0, // fp32, tf32, and anything unrecognised
     }
 }
 
 fn shape_num(shape: &crate::schema::JsonMap, key: &str) -> Option<f64> {
-    shape.get(key).and_then(serde_json::Value::as_f64)
+    shape
+        .get(key)
+        .and_then(serde_json::Value::as_f64)
+        .filter(|v| v.is_finite() && *v > 0.0)
+}
+
+/// Guard against a shape big enough to overflow the FLOP / byte arithmetic to
+/// infinity -- `serde_json` cannot serialise a non-finite float.
+fn finite_spec(spec: RooflineSpec) -> Option<RooflineSpec> {
+    (spec.flops.is_finite() && spec.bytes_hbm.is_finite()).then_some(spec)
 }
 
 /// The FLOP and HBM-byte counts for a built-in corpus kernel at a given shape,
@@ -364,7 +379,7 @@ pub fn corpus_spec(
         );
         let dt = dtype.unwrap_or("bf16");
         let elem = dtype_bytes(dt);
-        return Some(RooflineSpec {
+        return finite_spec(RooflineSpec {
             dtype: dt.to_string(),
             flops: 2.0 * m * n * k,
             bytes_hbm: (m * k + k * n + m * n) * elem,
@@ -374,7 +389,7 @@ pub fn corpus_spec(
     if key.ends_with("triad") {
         let n = shape_num(shape, "n")?;
         let dt = dtype.unwrap_or("fp32");
-        return Some(RooflineSpec {
+        return finite_spec(RooflineSpec {
             dtype: dt.to_string(),
             flops: 2.0 * n,                       // one add + one multiply per element
             bytes_hbm: 3.0 * n * dtype_bytes(dt), // read b, read c, write a
@@ -388,7 +403,7 @@ pub fn corpus_spec(
             shape_num(shape, "ilp")?,
         );
         let dt = dtype.unwrap_or("fp32");
-        return Some(RooflineSpec {
+        return finite_spec(RooflineSpec {
             dtype: dt.to_string(),
             flops: 2.0 * threads * iters * ilp,
             // register-resident: essentially no HBM traffic. A single nominal

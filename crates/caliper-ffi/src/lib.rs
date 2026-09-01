@@ -76,6 +76,18 @@ fn cross_pass_cov(pass_medians: Vec<f64>) -> Option<f64> {
     stats::cross_pass_cov(&pass_medians)
 }
 
+/// The requested quantiles (each `q` in `0.0..=1.0`) of a raw sample vector.
+/// Raises ``ValueError`` if `samples` is empty / non-finite, or a `q` is out of
+/// range.
+#[pyfunction]
+fn quantiles(samples: Vec<f64>, qs: Vec<f64>) -> PyResult<Vec<f64>> {
+    stats::quantiles(&samples, &qs).ok_or_else(|| {
+        PyValueError::new_err(
+            "samples must be non-empty and finite, and each quantile in 0.0..=1.0",
+        )
+    })
+}
+
 // --- warm-up ------------------------------------------------------------------
 
 /// Find the first warm sample index for `times`. Returns `(start, converged)`.
@@ -116,6 +128,11 @@ fn bench_replay_quantiles(
     opts_json: &str,
     quantiles: Vec<f64>,
 ) -> PyResult<Vec<f64>> {
+    if let Some(&bad) = quantiles.iter().find(|&&q| !(0.0..=1.0).contains(&q)) {
+        return Err(PyValueError::new_err(format!(
+            "quantile must be in 0.0..=1.0, got {bad}"
+        )));
+    }
     let opts: BenchOpts = serde_json::from_str(opts_json)
         .map_err(|e| PyValueError::new_err(format!("invalid bench options: {e}")))?;
     let (_record, qs) = caliper_gpu::run_replay_quantiles(recording, &opts, &quantiles)
@@ -208,10 +225,12 @@ fn corpus_roofline_spec(
 ) -> PyResult<Option<String>> {
     let shape: caliper_core::schema::JsonMap = serde_json::from_str(shape_json)
         .map_err(|e| PyValueError::new_err(format!("invalid shape: {e}")))?;
-    Ok(
-        caliper_core::roofline::corpus_spec(kernel_key, &shape, dtype)
-            .map(|s| serde_json::to_string(&s).expect("RooflineSpec serialises")),
-    )
+    match caliper_core::roofline::corpus_spec(kernel_key, &shape, dtype) {
+        None => Ok(None),
+        Some(spec) => serde_json::to_string(&spec)
+            .map(Some)
+            .map_err(|e| PyValueError::new_err(format!("cannot serialise roofline spec: {e}"))),
+    }
 }
 
 // --- corpus targets ------------------------------------------------------
@@ -223,11 +242,12 @@ fn resolve_corpus_target(name: &str) -> Option<&'static str> {
     corpus::resolve(name)
 }
 
-/// The built-in oracle targets as `(target, kernel_key, description)` triples.
+/// Every built-in `corpus:*` target (oracles and reference kernels) as
+/// `(target, kernel_key, description)` triples.
 #[pyfunction]
 fn corpus_targets() -> Vec<(String, String, String)> {
-    corpus::ORACLE_TARGETS
-        .iter()
+    corpus::all_targets()
+        .into_iter()
         .map(|(t, k, d)| (t.to_string(), k.to_string(), d.to_string()))
         .collect()
 }
@@ -339,6 +359,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(validate_record_json, module)?)?;
     module.add_function(wrap_pyfunction!(summarize, module)?)?;
     module.add_function(wrap_pyfunction!(cross_pass_cov, module)?)?;
+    module.add_function(wrap_pyfunction!(quantiles, module)?)?;
     module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
     module.add_function(wrap_pyfunction!(bench_replay, module)?)?;
     module.add_function(wrap_pyfunction!(bench_replay_quantiles, module)?)?;

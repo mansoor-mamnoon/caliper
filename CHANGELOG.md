@@ -136,9 +136,12 @@ tagged release onward.
   `nvidia-smi -q` / NVML / `--version` source, with a Colab dry-run.
 - `caliper.do_bench` -- a Triton-compatible `do_bench` shim (`quantiles`,
   `return_mode`, `grad_to_none` / `fast_flush` / `warmup` / `rep` accepted for
-  parity) that returns milliseconds. Backed by `bench_replay_quantiles`
-  (arbitrary per-launch quantiles) and the new `timing.mean_us` / `min_us` /
-  `max_us` schema fields; `Result` gains `.mean_us` / `.min_us` / `.max_us`.
+  parity) that returns milliseconds. A live callable is timed with CUDA events
+  the way Triton's own `do_bench` does (needs PyTorch + CUDA); a `recording=` /
+  `fixture=` replays a recorded session with no GPU. Backed by
+  `bench_replay_quantiles`, `caliper._core.quantiles`, and the new
+  `timing.mean_us` / `min_us` / `max_us` schema fields; `Result` gains
+  `.mean_us` / `.min_us` / `.max_us`.
 - `bench(corpus:*)` fills in `Record.roofline`: `roofline::corpus_spec` infers
   the FLOP / HBM-byte counts for `corpus:gemm` (from `shape={"M","N","K"}` +
   `dtype`), `oracle:triad`, and `oracle:fma_peak`. `bench()` gains a `shape=`

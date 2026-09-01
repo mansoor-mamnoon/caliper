@@ -76,6 +76,15 @@ def test_cuda_graph_mode_is_accepted() -> None:
         bench(recording=_rec("happy.jsonl"), batches=40, cuda_graph="sometimes")
 
 
+def test_auto_graph_decision_is_flagged() -> None:
+    captured = bench(recording=_rec("graph_auto.jsonl"), batches=40)
+    assert "graph-captured" in captured.flags  # launcher reported graph_used=true
+
+    eager = bench(recording=_rec("graph_eager.jsonl"), batches=40)
+    assert "graph-eager" in eager.flags  # 210 us single-launch -> policy: eager
+    assert "graph-captured" not in eager.flags
+
+
 def test_corpus_target_sets_the_kernel_key() -> None:
     r = bench("corpus:o1", recording=_rec("oracle_o1.jsonl"), batches=40)
     assert r.kernel["name"] == "oracle:busy"

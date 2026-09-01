@@ -62,7 +62,6 @@ pub struct BenchOpts {
     /// Roofline inputs (dtype + FLOP / HBM-byte counts) for the workload, when
     /// the caller can supply them (e.g. inferred for a `corpus:*` target).
     /// Drives `Record.roofline`.
-    #[serde(default)]
     pub roofline: Option<RooflineSpec>,
 }
 
@@ -150,20 +149,20 @@ fn run_inner<L: DeviceLayer + ?Sized>(
     };
     let raw = layer.time_batches(&spec)?;
 
-    // What CUDA-graph mode actually resolved to: the launcher's own report
-    // wins, else the policy over its single-launch probe. The flag notes a
-    // capture always (it explains a near-zero launch overhead), and an eager
-    // run only when `auto` actively chose it -- an explicit `off` is not news.
+    // Record whether a graph was actually used, when that is *known*: the
+    // launcher's own report is authoritative; failing that, an `auto` decision
+    // over the single-launch probe is meaningful. An explicit `on`/`off` that
+    // the launcher did not confirm is left unflagged (the request is not proof
+    // of what happened).
     let graph_choice = match raw.graph_used {
         Some(true) => GraphChoice::Capture,
         Some(false) => GraphChoice::Eager,
-        None => graph::resolve(opts.cuda_graph.as_str(), raw.single_launch_us),
+        None if matches!(opts.cuda_graph, GraphMode::Auto) => {
+            graph::resolve("auto", raw.single_launch_us)
+        }
+        None => GraphChoice::Unknown,
     };
-    let graph_flag = match graph_choice {
-        GraphChoice::Capture => Some("graph-captured"),
-        GraphChoice::Eager if matches!(opts.cuda_graph, GraphMode::Auto) => Some("graph-eager"),
-        _ => None,
-    };
+    let graph_flag = graph_choice.flag();
 
     throttle_reasons.extend(layer.throttle_reasons()?); // "after" poll
     throttle_reasons.extend(raw.throttle_reasons);

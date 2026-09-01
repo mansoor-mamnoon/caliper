@@ -124,6 +124,79 @@ def _read(fixture: str | Path | None, recording: str | None) -> str | None:
 _RETURN_MODES = ("min", "max", "mean", "median")
 
 
+def _reduce_times_ms(
+    times_ms: list[float], quantiles: list[float] | None, return_mode: str
+) -> float | list[float]:
+    """Reduce a raw millisecond sample vector the way Triton's ``do_bench``
+    does, using ``caliper._core`` for the percentile math."""
+    if quantiles is not None:
+        return list(_core.quantiles(times_ms, [float(q) for q in quantiles]))
+    summary = _core.summarize(times_ms)
+    return {
+        "mean": summary["mean"],
+        "median": summary["p50"],
+        "min": summary["min"],
+        "max": summary["max"],
+    }[return_mode]
+
+
+def _do_bench_live(
+    fn: Any,
+    warmup_ms: float,
+    rep_ms: float,
+    grad_to_none: Any,
+    quantiles: list[float] | None,
+    return_mode: str,
+) -> float | list[float]:
+    """Time a live callable with CUDA events, à la ``triton.testing.do_bench``.
+    Needs PyTorch + a CUDA device; raises ``NotImplementedError`` otherwise."""
+    try:
+        import torch
+    except ImportError as exc:  # pragma: no cover - torch not installed on the dev box
+        raise NotImplementedError(
+            "caliper.do_bench() on a live callable needs PyTorch with CUDA. Pass "
+            "fixture=<path> or recording=<text> for the no-GPU path."
+        ) from exc
+    if not torch.cuda.is_available():  # pragma: no cover - no CUDA on the dev box
+        raise NotImplementedError(
+            "caliper.do_bench() on a live callable needs a CUDA device. Pass "
+            "fixture=<path> or recording=<text> for the no-GPU path."
+        )
+
+    # pragma: no cover below - exercised on a CUDA host (playbook #10), not in CI
+    fn()
+    torch.cuda.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    start.record()
+    for _ in range(5):
+        cache.zero_()
+        fn()
+    end.record()
+    torch.cuda.synchronize()
+    estimate_ms = max(start.elapsed_time(end) / 5.0, 1e-6)
+
+    n_warmup = max(1, int(warmup_ms / estimate_ms))
+    n_repeat = max(1, int(rep_ms / estimate_ms))
+    starts = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
+    ends = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
+    for _ in range(n_warmup):
+        fn()
+    for i in range(n_repeat):
+        if grad_to_none is not None:
+            for x in grad_to_none:
+                x.grad = None
+        cache.zero_()
+        starts[i].record()
+        fn()
+        ends[i].record()
+    torch.cuda.synchronize()
+    times_ms = [s.elapsed_time(e) for s, e in zip(starts, ends, strict=True)]
+    return _reduce_times_ms(times_ms, quantiles, return_mode)
+
+
 def do_bench(
     fn: Any = None,
     warmup: float = 25,
@@ -148,26 +221,26 @@ def do_bench(
     / ``"mean"`` / ``"median"``; ``quantiles`` (e.g. ``[0.5, 0.2, 0.8]``)
     overrides it and returns a list.
 
-    ``warmup`` / ``rep`` (Triton's millisecond budgets), ``grad_to_none``, and
-    ``fast_flush`` are accepted for compatibility. On the recorded-session path
-    the sample count is already fixed, so ``warmup`` / ``rep`` are inert and the
-    grad / flush handling is the on-device launcher's job.
+    Two modes:
 
-    Timing a live ``fn`` needs the on-device launcher (a CUDA host); until then
-    pass ``fixture=`` / ``recording=`` a device recording.
+    * a live ``fn`` (no ``fixture`` / ``recording``) is timed with CUDA events,
+      like Triton's own ``do_bench`` -- needs PyTorch + a CUDA device.
+    * ``fixture=`` / ``recording=`` replays a recorded device session, so the
+      shim works with no GPU.
+
+    ``fast_flush`` is accepted for compatibility (the live path always clears an
+    L2-sized buffer between reps). For the rigorous, clock-locked measurement
+    use :func:`bench` instead.
     """
     if return_mode not in _RETURN_MODES:
         raise ValueError(f"return_mode must be one of {_RETURN_MODES}, got {return_mode!r}")
-    del fn, warmup, rep, grad_to_none, fast_flush  # accepted for Triton parity; see docstring
+    del fast_flush  # accepted for Triton parity; the live path always flushes
 
     text = _read(fixture, recording)
     if text is None:
-        raise NotImplementedError(
-            "caliper.do_bench() currently runs from a recorded device session; pass "
-            "fixture=<path> or recording=<text>. Timing a live callable needs the "
-            "on-device launcher, which runs on a CUDA host."
-        )
+        return _do_bench_live(fn, warmup, rep, grad_to_none, quantiles, return_mode)
 
+    del fn, warmup, rep, grad_to_none  # a recording fixes the samples; see bench()
     opts = json.dumps(
         {"kernel_key": kernel_key, "dtype": dtype, "batch": batch, "batches": batches}
     )

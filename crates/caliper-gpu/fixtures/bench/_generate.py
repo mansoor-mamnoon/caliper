@@ -380,6 +380,29 @@ def graph_auto() -> None:
     )
 
 
+def graph_eager() -> None:
+    # A long kernel (~200 us/launch) under cuda_graph="auto": the single-launch
+    # probe (210 us) is well above the capture threshold, the launcher did not
+    # report graph_used, so the policy resolves to eager and the run is tagged
+    # `graph-eager`.
+    n = 40
+    gpu = [round(6400.0 + 3.0 * math.sin(i / 2.0), 3) for i in range(n)]
+    wall = [round(g + 320.0, 3) for g in gpu]
+    write(
+        "graph_eager.jsonl",
+        [
+            snapshot(),
+            ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
+            time_batches(n, gpu, wall, [], [], single_launch_us=210.0),
+            ok("gpu_clock", "throttle_reasons", None, []),
+            probe("kernel"),
+            read(2520, True),
+            ok("gpu_clock", "unlock", None, None),
+        ],
+    )
+
+
 if __name__ == "__main__":
     for f in (
         happy,
@@ -392,7 +415,8 @@ if __name__ == "__main__":
         multi_kernel_probe,
         probe_hard_error_fixture,
         graph_auto,
+        graph_eager,
         gemm,
     ):
         f()
-    print("wrote 11 bench fixtures")
+    print("wrote 12 bench fixtures")
