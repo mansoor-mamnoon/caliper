@@ -32,9 +32,8 @@ def _configs(kernel: Any) -> list[dict[str, Any]]:
 
 
 def test_adding_a_config_re_times_only_the_new_one(tmp_path: Path) -> None:
-    from caliper.corpus.kernels import gemm  # lands next
-
     from caliper import sweep
+    from caliper.corpus.kernels import gemm
 
     spec = {
         "target": "corpus:gemm",
