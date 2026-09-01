@@ -47,6 +47,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_fp = sub.add_parser("fingerprint", help="print the machine fingerprint")
     p_fp.add_argument("--recording", metavar="PATH")
     p_fp.add_argument("--json", action="store_true")
+    p_fp.add_argument(
+        "--check",
+        action="store_true",
+        help="report completeness instead; exit 1 if a required field is missing",
+    )
 
     return parser
 
@@ -112,10 +117,27 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 def _cmd_fingerprint(args: argparse.Namespace) -> int:
     try:
-        machine = api.fingerprint(recording=_recording_text(args))
+        recording = _recording_text(args)
+        if args.check:
+            report = api.fingerprint_check(recording=recording)
+        else:
+            machine = api.fingerprint(recording=recording)
     except (ValueError, OSError) as exc:
         print(f"caliper fingerprint: {exc}", file=sys.stderr)
         return 2
+
+    if args.check:
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            state = "complete" if report["complete"] else "INCOMPLETE"
+            print(f"fingerprint: {state}")
+            for field in report["missing_required"]:
+                print(f"  missing (required)    {field}")
+            for field in report["missing_recommended"]:
+                print(f"  missing (recommended) {field}")
+        return 0 if report["complete"] else 1
+
     if args.json:
         print(json.dumps(machine, indent=2))
     else:

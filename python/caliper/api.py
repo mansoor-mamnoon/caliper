@@ -145,6 +145,11 @@ def doctor_text(
     return _core.doctor_render_replay(text)
 
 
+def _fingerprint_json(fixture: str | Path | None, recording: str | None) -> str:
+    text = _read(fixture, recording)
+    return _core.fingerprint_from_env() if text is None else _core.fingerprint_replay(text)
+
+
 def fingerprint(
     *,
     fixture: str | Path | None = None,
@@ -155,7 +160,33 @@ def fingerprint(
     Sources the same way as :func:`doctor`. Raises ``ValueError`` when there is
     no device.
     """
-    text = _read(fixture, recording)
-    raw = _core.fingerprint_from_env() if text is None else _core.fingerprint_replay(text)
-    machine: dict[str, Any] = json.loads(raw)
+    machine: dict[str, Any] = json.loads(_fingerprint_json(fixture, recording))
     return machine
+
+
+def fingerprint_check(
+    *,
+    fixture: str | Path | None = None,
+    recording: str | None = None,
+) -> dict[str, Any]:
+    """Completeness of the machine fingerprint.
+
+    Returns ``{"complete": bool, "missing_required": [...],
+    "missing_recommended": [...]}``. A fingerprint has to be complete for a
+    result to be comparable across machines.
+    """
+    report: dict[str, Any] = json.loads(
+        _core.fingerprint_check(_fingerprint_json(fixture, recording))
+    )
+    return report
+
+
+def toolchain() -> dict[str, str | None]:
+    """Detected local kernel toolchain (Triton, PyTorch, ``nvcc``, ``ptxas``).
+
+    Each value is a version string, or ``None`` when that tool or package is not
+    installed here.
+    """
+    from caliper import _toolchain
+
+    return _toolchain.detect()

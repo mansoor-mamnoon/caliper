@@ -259,6 +259,40 @@ fn fingerprint_from_env() -> PyResult<String> {
     serde_json::to_string(&machine).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+/// Completeness check for a machine-fingerprint JSON document. Returns
+/// `{complete, missing_required, missing_recommended}` as JSON. Raises
+/// ``ValueError`` if the input is not a machine document.
+#[pyfunction]
+fn fingerprint_check(machine_json: &str) -> PyResult<String> {
+    let m = caliper_core::fingerprint::from_json(machine_json)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let c = caliper_core::fingerprint::check(&m);
+    Ok(serde_json::to_string(&c).expect("FingerprintCheck serialises"))
+}
+
+/// `True` iff every required fingerprint field is present. Raises
+/// ``ValueError`` if the input is not a machine document.
+#[pyfunction]
+fn fingerprint_is_complete(machine_json: &str) -> PyResult<bool> {
+    let m = caliper_core::fingerprint::from_json(machine_json)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(caliper_core::fingerprint::is_complete(&m))
+}
+
+/// The CUDA toolchain version in `nvcc --version` output, e.g. `"12.4.131"`, or
+/// `None` if the text carries no recognisable version.
+#[pyfunction]
+fn parse_nvcc_version(output: &str) -> Option<String> {
+    caliper_core::fingerprint::parse_nvcc_version(output)
+}
+
+/// The CUDA toolchain version in `ptxas --version` output. Same shape as
+/// [`parse_nvcc_version`].
+#[pyfunction]
+fn parse_ptxas_version(output: &str) -> Option<String> {
+    caliper_core::fingerprint::parse_ptxas_version(output)
+}
+
 #[pymodule]
 fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", schema::CALIPER_VERSION)?;
@@ -284,5 +318,9 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(doctor_render_from_env, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_replay, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_from_env, module)?)?;
+    module.add_function(wrap_pyfunction!(fingerprint_check, module)?)?;
+    module.add_function(wrap_pyfunction!(fingerprint_is_complete, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_nvcc_version, module)?)?;
+    module.add_function(wrap_pyfunction!(parse_ptxas_version, module)?)?;
     Ok(())
 }

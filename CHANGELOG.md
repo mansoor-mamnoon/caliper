@@ -119,3 +119,18 @@ tagged release onward.
   occupancy model disagree by more than one block the record is flagged
   `occupancy-model-mismatch`. `RawSamples` carries `block_size` / `grid_blocks`
   / `dynamic_smem_bytes` so the launcher can feed both the model and the check.
+- `caliper_core::fingerprint` -- a completeness check for the machine block:
+  every hardware / driver / `nvcc` / `ptxas` field is *required* (a gap makes
+  the fingerprint incomplete and `caliper fingerprint --check` exit 1), Triton
+  and PyTorch versions are *recommended*. Plus `parse_nvcc_version` /
+  `parse_ptxas_version` for the `Cuda compilation tools, release X, V X.Y.Z`
+  line. Exposed as `caliper._core.fingerprint_check` /
+  `fingerprint_is_complete` / `parse_{nvcc,ptxas}_version` and
+  `caliper.fingerprint_check()`.
+- `caliper._toolchain` / `caliper.toolchain()` -- detect the local Triton,
+  PyTorch, `nvcc`, and `ptxas` versions (package metadata + `--version`
+  subprocesses parsed by the Rust core), each `None` when absent.
+- `caliper fingerprint --check` reports fingerprint completeness and exits 1 on
+  a missing required field.
+- `docs/checklist_fingerprint.md` -- every machine field mapped to its
+  `nvidia-smi -q` / NVML / `--version` source, with a Colab dry-run.

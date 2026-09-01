@@ -82,6 +82,10 @@ warn_unused_configs = true
 module = "tests.*"
 disallow_untyped_decorators = false
 
+[[tool.mypy.overrides]]
+module = "torch.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]

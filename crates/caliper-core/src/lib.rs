@@ -9,6 +9,7 @@
 //! model, sweep-spec expansion) lands here module by module.
 
 pub mod doctor;
+pub mod fingerprint;
 pub mod occupancy;
 pub mod oracles;
 pub mod pipeline;
@@ -19,6 +20,10 @@ pub mod stats;
 pub mod warmup;
 
 pub use doctor::{assess, DoctorFacts, DoctorReport};
+pub use fingerprint::{
+    assert_complete as assert_fingerprint_complete, check as check_fingerprint, FingerprintCheck,
+    FingerprintError,
+};
 pub use occupancy::{theoretical_occupancy, Limiter, OccupancyEstimate};
 pub use oracles::{fit_line, LineFit, OracleCheck};
 pub use pipeline::{flush_buffer_bytes, invalidate, reduce, PipelineError, ReduceInput};

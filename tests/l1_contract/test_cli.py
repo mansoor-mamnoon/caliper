@@ -130,3 +130,11 @@ def test_fingerprint_from_a_recording(capsys: pytest.CaptureFixture[str]) -> Non
 
 def test_fingerprint_from_env_without_a_gpu_exits_two() -> None:
     assert main(["fingerprint"]) == 2
+
+
+def test_fingerprint_check_on_a_complete_recording(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["fingerprint", "--recording", str(DOCTOR / "fit.jsonl"), "--check", "--json"])
+    assert code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["complete"] is True
+    assert report["missing_required"] == []
