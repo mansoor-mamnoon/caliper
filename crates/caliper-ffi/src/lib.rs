@@ -335,6 +335,22 @@ fn fingerprint_is_complete(machine_json: &str) -> PyResult<bool> {
     Ok(caliper_core::fingerprint::is_complete(&m))
 }
 
+// --- shape libraries ------------------------------------------------------
+
+/// The concrete shape list for a named library (`"square-pow2"`, `"prime-odd"`,
+/// `"llm-7b"`, `"llm-70b"`), as a JSON array; `None` for an unknown name.
+#[pyfunction]
+fn resolve_shape_library(name: &str) -> Option<String> {
+    caliper_core::shapes::resolve(name)
+        .map(|shapes| serde_json::to_string(&shapes).expect("Vec<Shape> serialises"))
+}
+
+/// Every shape-library name.
+#[pyfunction]
+fn shape_library_names() -> Vec<&'static str> {
+    caliper_core::shapes::LIBRARY_NAMES.to_vec()
+}
+
 // --- selftest --------------------------------------------------------------
 
 /// Run `caliper selftest` against the `CALIPER_GPU_PORTS` backend and return
@@ -453,6 +469,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint_from_env, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_check, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_is_complete, module)?)?;
+    module.add_function(wrap_pyfunction!(resolve_shape_library, module)?)?;
+    module.add_function(wrap_pyfunction!(shape_library_names, module)?)?;
     module.add_function(wrap_pyfunction!(selftest_from_env, module)?)?;
     module.add_function(wrap_pyfunction!(selftest_assemble, module)?)?;
     module.add_function(wrap_pyfunction!(validate_selftest_json, module)?)?;

@@ -18,6 +18,7 @@ pub mod ptxas_parse;
 pub mod roofline;
 pub mod schema;
 pub mod selftest;
+pub mod shapes;
 pub mod stats;
 pub mod warmup;
 
@@ -39,5 +40,6 @@ pub use roofline::{
 };
 pub use schema::{Record, SCHEMA_VERSION};
 pub use selftest::{CheckStatus, Coverage, Outcome, SelftestCheck, SelftestReport};
+pub use shapes::{resolve as resolve_shape_library, Shape};
 pub use stats::{cross_pass_cov, summarize, Summary};
 pub use warmup::{steady_state, Warmup, WarmupOpts, WarmupPlan};
