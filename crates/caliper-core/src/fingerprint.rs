@@ -15,12 +15,13 @@
 //! * **Recommended** -- framework versions (`triton`, `torch`) that are simply
 //!   absent on a pure CUDA-C setup. Reported, but not an error.
 
-use serde::{Deserialize, Serialize};
+use serde::de::Error as _;
+use serde::Serialize;
 
 use crate::schema::Machine;
 
 /// Why a fingerprint field is expected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Tier {
     /// Hardware / driver identity; a gap makes the fingerprint incomplete.
@@ -161,12 +162,20 @@ impl std::fmt::Display for FingerprintError {
 
 impl std::error::Error for FingerprintError {}
 
-/// Parse a [`Machine`] from JSON (lenient, like the rest of the schema).
+/// Parse a [`Machine`] from JSON (lenient about *fields*, like the rest of the
+/// schema: unknown keys are ignored, missing ones default). The document itself
+/// must be a JSON object -- `serde` would otherwise accept a positional array.
 ///
 /// # Errors
-/// The `serde_json` error if `s` is not a JSON object of the right shape.
+/// A `serde_json` error if `s` is not JSON, or is JSON but not an object.
 pub fn from_json(s: &str) -> Result<Machine, serde_json::Error> {
-    serde_json::from_str(s)
+    let value: serde_json::Value = serde_json::from_str(s)?;
+    if !value.is_object() {
+        return Err(serde_json::Error::custom(
+            "fingerprint document must be a JSON object",
+        ));
+    }
+    serde_json::from_value(value)
 }
 
 /// Serialise a [`Machine`] to canonical compact JSON.
@@ -204,11 +213,15 @@ fn parse_cuda_tool_version(output: &str) -> Option<String> {
             .collect::<String>()
     };
 
-    // Prefer the fully-qualified `V12.4.131` token.
+    let usable = |v: &str| v.contains('.') && !v.ends_with('.');
+
+    // Prefer the fully-qualified `V12.4.131` token (also matches a 2-part
+    // `V13.0` when a build number is not printed). `str::lines` already strips
+    // a trailing `\r`, so CRLF output is handled.
     for line in output.lines() {
         if let Some(pos) = line.find(", V") {
             let v = take_version(&line[pos + 3..]);
-            if v.matches('.').count() >= 2 && !v.ends_with('.') {
+            if usable(&v) {
                 return Some(v);
             }
         }
@@ -217,8 +230,8 @@ fn parse_cuda_tool_version(output: &str) -> Option<String> {
     for line in output.lines() {
         if let Some(pos) = line.find("release ") {
             let v = take_version(&line[pos + "release ".len()..]);
-            let v = v.trim_end_matches(',').to_string();
-            if v.contains('.') && !v.ends_with('.') {
+            let v = v.trim_end_matches('.').to_string();
+            if usable(&v) {
                 return Some(v);
             }
         }
@@ -311,7 +324,37 @@ mod tests {
     fn an_empty_machine_lists_every_required_field() {
         let c = check(&Machine::default());
         assert!(!c.complete);
+        // Canary: bump this (and the Python mirror) when a field is added to
+        // the required set. Every reported field is distinct.
         assert_eq!(c.missing_required.len(), 17);
+        let mut uniq = c.missing_required.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(uniq.len(), 17);
+        assert!(c.missing_recommended.contains(&"toolkit.triton"));
+    }
+
+    #[test]
+    fn gaps_returns_both_tiers_in_field_order() {
+        let g = gaps(&Machine::default());
+        assert_eq!(g.first().unwrap().field, "gpu_name");
+        assert!(g
+            .iter()
+            .any(|x| x.field == "toolkit.nvcc" && x.tier == Tier::Required));
+        assert!(g
+            .iter()
+            .any(|x| x.field == "toolkit.torch" && x.tier == Tier::Recommended));
+        // required fields come before recommended ones
+        let last_req = g.iter().rposition(|x| x.tier == Tier::Required).unwrap();
+        let first_rec = g.iter().position(|x| x.tier == Tier::Recommended).unwrap();
+        assert!(last_req < first_rec);
+    }
+
+    #[test]
+    fn from_json_rejects_non_object_documents() {
+        assert!(from_json("[]").is_err());
+        assert!(from_json("42").is_err());
+        assert!(from_json("\"sm_89\"").is_err());
     }
 
     #[test]
@@ -339,9 +382,30 @@ mod tests {
     }
 
     #[test]
+    fn version_handles_crlf_cuda13_and_a_missing_build_number() {
+        // CRLF line endings (str::lines strips the trailing \r).
+        let crlf = "nvcc: NVIDIA (R) Cuda compiler driver\r\n\
+                    Cuda compilation tools, release 12.4, V12.4.131\r\n";
+        assert_eq!(parse_nvcc_version(crlf).as_deref(), Some("12.4.131"));
+
+        // CUDA 13.
+        let c13 = "Cuda compilation tools, release 13.0, V13.0.48\n";
+        assert_eq!(parse_nvcc_version(c13).as_deref(), Some("13.0.48"));
+
+        // The V token with no build number is still preferred over `release`.
+        let two = "Cuda compilation tools, release 12.9, V12.9\n";
+        assert_eq!(parse_nvcc_version(two).as_deref(), Some("12.9"));
+    }
+
+    #[test]
     fn unrecognised_text_yields_none() {
         assert_eq!(parse_nvcc_version(""), None);
         assert_eq!(parse_nvcc_version("command not found"), None);
         assert_eq!(parse_ptxas_version("release without a number"), None);
+        // a ", V" that is not a version token
+        assert_eq!(
+            parse_nvcc_version("Redistribution, Verification prohibited"),
+            None
+        );
     }
 }

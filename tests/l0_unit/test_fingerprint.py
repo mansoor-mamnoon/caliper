@@ -63,9 +63,10 @@ def test_empty_machine_lists_every_required_field() -> None:
     assert len(report["missing_required"]) == 17
 
 
-def test_fingerprint_check_rejects_non_json() -> None:
+@pytest.mark.parametrize("bad", ["{not json", "[]", "42", '"sm_89"'])
+def test_fingerprint_check_rejects_non_object_documents(bad: str) -> None:
     with pytest.raises(ValueError):
-        _core.fingerprint_check("{not json")
+        _core.fingerprint_check(bad)
 
 
 NVCC_OUT = (

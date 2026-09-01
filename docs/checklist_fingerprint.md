@@ -50,10 +50,12 @@ error: a pure CUDA-C host has no Triton or PyTorch.
      python -m caliper fingerprint --json | tee /tmp/fp.json
    ```
 
-2. Confirm it is complete:
+2. Confirm it is complete (exit 0; exit 1 lists any missing required field):
 
    ```bash
-   python -c "import json,caliper; print(caliper.api.fingerprint_check())"
+   python -m caliper fingerprint --check
+   # or, from Python, against the same recording:
+   python -c "from caliper import api; print(api.fingerprint_check(recording=open('/tmp/fp.jsonl').read()))"
    # -> {'complete': True, 'missing_required': [], 'missing_recommended': [...]}
    ```
 
