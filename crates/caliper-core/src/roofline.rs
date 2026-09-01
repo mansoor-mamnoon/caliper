@@ -359,10 +359,11 @@ fn finite_spec(spec: RooflineSpec) -> Option<RooflineSpec> {
 /// so `bench(corpus:*)` can fill in the roofline section without a hand-written
 /// spec.
 ///
-/// Recognises `corpus:gemm*` (needs `M` / `N` / `K` in `shape`), `oracle:triad`
-/// (needs `n`), and `oracle:fma_peak` (needs `threads` / `iters` / `ilp`).
-/// Returns `None` for a kernel with no meaningful roofline (a pure spin) or a
-/// shape that is missing a dimension.
+/// Recognises `corpus:gemm*` (needs `M` / `N` / `K` in `shape`),
+/// `corpus:rmsnorm*` / `corpus:softmax*` (needs `ROWS` / `COLS`),
+/// `oracle:triad` (needs `n`), and `oracle:fma_peak` (needs `threads` /
+/// `iters` / `ilp`). Returns `None` for a kernel with no meaningful roofline
+/// (a pure spin) or a shape that is missing a dimension.
 #[must_use]
 pub fn corpus_spec(
     kernel_key: &str,
@@ -393,6 +394,34 @@ pub fn corpus_spec(
             dtype: dt.to_string(),
             flops: 2.0 * n,                       // one add + one multiply per element
             bytes_hbm: 3.0 * n * dtype_bytes(dt), // read b, read c, write a
+        });
+    }
+
+    // RMSNorm forward: per element, square + reduce-sum + normalize-multiply +
+    // weight-multiply ~= 4 FLOPs (the O(rows) mean/rsqrt is negligible at any
+    // real `cols`); HBM traffic is dominated by reading `x` and writing `y`,
+    // each `rows*cols` elements (the `cols`-sized weight vector is negligible
+    // at any real `rows` and is not counted).
+    if key.contains("rmsnorm") {
+        let (rows, cols) = (shape_num(shape, "ROWS")?, shape_num(shape, "COLS")?);
+        let dt = dtype.unwrap_or("bf16");
+        return finite_spec(RooflineSpec {
+            dtype: dt.to_string(),
+            flops: 4.0 * rows * cols,
+            bytes_hbm: 2.0 * rows * cols * dtype_bytes(dt),
+        });
+    }
+
+    // Softmax forward: per element, row-max + subtract + exp + reduce-sum +
+    // divide ~= 5 FLOPs (`exp` counted as one op, matching common practice);
+    // HBM traffic is read `x` + write `y`, same accounting as rmsnorm above.
+    if key.contains("softmax") {
+        let (rows, cols) = (shape_num(shape, "ROWS")?, shape_num(shape, "COLS")?);
+        let dt = dtype.unwrap_or("bf16");
+        return finite_spec(RooflineSpec {
+            dtype: dt.to_string(),
+            flops: 5.0 * rows * cols,
+            bytes_hbm: 2.0 * rows * cols * dtype_bytes(dt),
         });
     }
 
@@ -594,6 +623,35 @@ mod tests {
     }
 
     #[test]
+    fn corpus_spec_for_rmsnorm_is_memory_bound() {
+        let s = corpus_spec(
+            "corpus:rmsnorm",
+            &shape(&[("ROWS", 4096.0), ("COLS", 8192.0)]),
+            Some("bf16"),
+        )
+        .unwrap();
+        approx(s.flops, 4.0 * 4096.0 * 8192.0);
+        approx(s.bytes_hbm, 2.0 * 4096.0 * 8192.0 * 2.0); // read x + write y, bf16
+        assert_eq!(s.dtype, "bf16");
+        let r = analyze("sm_80", &s, 50.0e-6);
+        assert_eq!(r.bound, Bound::Memory);
+    }
+
+    #[test]
+    fn corpus_spec_for_softmax_is_memory_bound() {
+        let s = corpus_spec(
+            "corpus:softmax",
+            &shape(&[("ROWS", 4096.0), ("COLS", 8192.0)]),
+            Some("bf16"),
+        )
+        .unwrap();
+        approx(s.flops, 5.0 * 4096.0 * 8192.0);
+        approx(s.bytes_hbm, 2.0 * 4096.0 * 8192.0 * 2.0);
+        let r = analyze("sm_80", &s, 50.0e-6);
+        assert_eq!(r.bound, Bound::Memory);
+    }
+
+    #[test]
     fn corpus_spec_for_triad_is_memory_bound() {
         let s = corpus_spec("oracle:triad", &shape(&[("n", 1.0e8)]), None).unwrap();
         approx(s.flops, 2.0e8);
@@ -620,5 +678,7 @@ mod tests {
     fn corpus_spec_is_none_for_a_spin_or_a_missing_dimension() {
         assert!(corpus_spec("oracle:busy", &shape(&[]), None).is_none());
         assert!(corpus_spec("corpus:gemm_bf16", &shape(&[("M", 4096.0)]), None).is_none());
+        assert!(corpus_spec("corpus:rmsnorm", &shape(&[("ROWS", 4096.0)]), None).is_none());
+        assert!(corpus_spec("corpus:softmax", &shape(&[]), None).is_none());
     }
 }

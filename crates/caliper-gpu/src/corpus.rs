@@ -35,11 +35,23 @@ pub const ORACLE_TARGETS: &[(&str, &str, &str)] = &[
 
 /// Non-oracle reference kernels in the `corpus:` namespace -- workloads with a
 /// known FLOP / byte count that the roofline model can be checked against.
-pub const REFERENCE_TARGETS: &[(&str, &str, &str)] = &[(
-    "corpus:gemm",
-    "corpus:gemm_bf16",
-    "dense bf16 GEMM (roofline / cuBLAS reference)",
-)];
+pub const REFERENCE_TARGETS: &[(&str, &str, &str)] = &[
+    (
+        "corpus:gemm",
+        "corpus:gemm_bf16",
+        "dense bf16 GEMM (roofline / cuBLAS reference)",
+    ),
+    (
+        "corpus:rmsnorm",
+        "corpus:rmsnorm",
+        "RMSNorm forward (roofline / torch reference)",
+    ),
+    (
+        "corpus:softmax",
+        "corpus:softmax",
+        "row-wise softmax forward (roofline / torch reference)",
+    ),
+];
 
 /// Every `corpus:*` target: the oracles plus the reference kernels.
 #[must_use]
@@ -76,6 +88,8 @@ mod tests {
         assert_eq!(resolve("corpus:o1"), Some("oracle:busy"));
         assert_eq!(resolve("corpus:o6"), Some("oracle:throttle_bait"));
         assert_eq!(resolve("corpus:gemm"), Some("corpus:gemm_bf16"));
+        assert_eq!(resolve("corpus:rmsnorm"), Some("corpus:rmsnorm"));
+        assert_eq!(resolve("corpus:softmax"), Some("corpus:softmax"));
         assert_eq!(resolve("corpus:o9"), None);
         assert_eq!(resolve("mykernel.py::fn"), None);
         assert!(is_corpus_target("corpus:o1"));
