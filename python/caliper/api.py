@@ -364,7 +364,11 @@ def validate_records(path: str | Path) -> dict[str, Any]:
 
     problems: list[dict[str, Any]] = []
     for i, rec in enumerate(records):
-        row_problems = _core.validate_record_json(json.dumps(rec))
+        try:
+            row_problems = _core.validate_record_json(json.dumps(rec))
+        except ValueError as exc:
+            # a wrong-typed field: the row is invalid, not the file unreadable
+            row_problems = [f"does not parse as a record: {exc}"]
         if row_problems:
             problems.append({"row": i, "problems": row_problems})
     return {

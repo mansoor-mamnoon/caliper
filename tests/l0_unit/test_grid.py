@@ -75,7 +75,8 @@ def test_parquet_round_trip_and_schema(tmp_path: Path) -> None:
     assert table.num_rows == 3
     hashes = table.column("toolchain_hash").to_pylist()
     assert hashes[0] == hashes[2]  # same toolkit + driver
-    assert all(isinstance(h, str) and h.startswith("sha256:") for h in hashes)
+    # a bare sha256 hex digest -- it becomes a directory segment in caliper-results
+    assert all(isinstance(h, str) and len(h) == 64 and int(h, 16) >= 0 for h in hashes)
 
     back = Grid.from_parquet(p)
     assert [r.machine["sm_arch"] for r in back] == ["sm_89", "sm_90", "sm_89"]

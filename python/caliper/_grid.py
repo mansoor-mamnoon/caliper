@@ -51,7 +51,7 @@ def _unflatten(row: dict[str, Any]) -> dict[str, Any]:
         node = out
         for part in parts[:-1]:
             node = node.setdefault(part, {})
-        if isinstance(value, str) and value[:1] in "[{":
+        if isinstance(value, str) and value[:1] in ("[", "{"):
             with contextlib.suppress(json.JSONDecodeError):
                 value = json.loads(value)
         node[parts[-1]] = value
@@ -67,14 +67,27 @@ _CANONICAL_COLUMNS: list[str] = [
 
 
 def _toolchain_hash(machine: dict[str, Any]) -> str:
+    """The Appendix-C partition key: sha256 of the toolkit map and the driver.
+
+    Exact recipe (a ``caliper-results`` validator must reproduce it byte for
+    byte, and it becomes a directory segment, so no prefix):
+
+        sha256( json.dumps(toolkit, sort_keys=True, separators=(",", ":"))
+                + "\\x00" + (driver or "") ).hexdigest()
+    """
     toolkit = machine.get("toolkit") or {}
-    material = json.dumps(sorted(toolkit.items()), separators=(",", ":"))
-    material += machine.get("driver") or ""
-    return "sha256:" + hashlib.sha256(material.encode()).hexdigest()
+    material = json.dumps(toolkit, sort_keys=True, separators=(",", ":"))
+    material += "\x00" + (machine.get("driver") or "")
+    return hashlib.sha256(material.encode()).hexdigest()
 
 
 class Grid:
-    """An ordered collection of measurement records."""
+    """An ordered collection of measurement records.
+
+    Every row is normalised through the result schema on construction (unknown
+    keys dropped, missing sections defaulted), so ``Grid(raw_dicts).to_json()``
+    emits schema-normalised records, not the input verbatim.
+    """
 
     __slots__ = ("_rows",)
 

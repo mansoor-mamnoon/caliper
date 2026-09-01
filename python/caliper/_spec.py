@@ -1,7 +1,8 @@
 """Read a ``sweep`` spec (Appendix D YAML) and expand it to a cell list.
 
 YAML parsing is a Python concern; validation and expansion are the Rust core's
-(``caliper._core.expand_spec``), so the two agree on what a spec means.
+(``caliper._core.expand_spec``), so the two agree on what a spec means. PyYAML
+is an optional dependency: ``pip install 'caliper-gpu[sweep]'``.
 """
 
 from __future__ import annotations
@@ -10,19 +11,26 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from caliper import _core
 
-__all__ = ["load_cells", "pending_cells"]
+__all__ = ["cell_keys", "load_cells", "pending_cells"]
+
+
+def _yaml_load(text: str) -> Any:
+    try:
+        import yaml
+    except ImportError as exc:  # pragma: no cover - yaml is in the dev env
+        raise ImportError(
+            "reading a sweep spec needs PyYAML: pip install 'caliper-gpu[sweep]'"
+        ) from exc
+    return yaml.safe_load(text)
 
 
 def _spec_to_json(spec: str | Path | dict[str, Any]) -> str:
     """Normalise a spec (a ``Path``, YAML text, or a dict) to a JSON string."""
     if isinstance(spec, dict):
         return json.dumps(spec)
-    text = spec.read_text() if isinstance(spec, Path) else spec
-    parsed = yaml.safe_load(text)
+    parsed = _yaml_load(spec.read_text() if isinstance(spec, Path) else spec)
     if not isinstance(parsed, dict):
         raise ValueError("a sweep spec must be a YAML mapping")
     return json.dumps(parsed)
@@ -32,11 +40,17 @@ def load_cells(spec: str | Path | dict[str, Any]) -> list[dict[str, Any]]:
     """Validate and expand a spec to its deduplicated cell list.
 
     ``spec`` is a ``Path`` to the YAML file, the YAML text itself, or an
-    already-parsed dict. Raises ``ValueError`` (with a typed message) on any
-    malformed field.
+    already-parsed dict (a plain ``str`` is always treated as YAML text, never a
+    path). Raises ``ValueError`` (with a typed message) on any malformed field.
     """
     cells: list[dict[str, Any]] = json.loads(_core.expand_spec(_spec_to_json(spec)))
     return cells
+
+
+def cell_keys(cells: list[dict[str, Any]]) -> list[str]:
+    """The stable ``--resume`` key for each cell."""
+    keys: list[str] = _core.spec_cell_keys(json.dumps(cells))
+    return keys
 
 
 def pending_cells(cells: list[dict[str, Any]], done_keys: list[str]) -> list[dict[str, Any]]:

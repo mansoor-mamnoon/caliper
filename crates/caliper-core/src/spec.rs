@@ -136,7 +136,10 @@ pub struct Cell {
 
 impl Cell {
     /// A stable identity for dedupe and `--resume`. The bench parameters do not
-    /// vary within one spec, so they are not part of the key.
+    /// vary within one spec, so they are not part of the key -- a `--resume`
+    /// state file (added with `sweep()`) must additionally record a spec hash so
+    /// that re-running with different bench parameters does not resume over the
+    /// old measurements.
     #[must_use]
     pub fn key(&self) -> String {
         format!(
@@ -169,6 +172,10 @@ pub enum SpecError {
     UnknownLayout(String),
     /// `bench.warmup` was a word other than `"auto"`.
     BadWarmup(String),
+    /// `bench.cuda_graph` was not `"auto"` / `"on"` / `"off"`.
+    BadCudaGraph(String),
+    /// `bench.min_samples` was zero.
+    ZeroMinSamples,
     /// `shapes:` named a library that does not exist.
     UnknownShapeLibrary(String),
     /// An inline shape has a non-positive dimension.
@@ -190,6 +197,13 @@ impl std::fmt::Display for SpecError {
             Self::UnknownDtype(d) => write!(f, "unknown dtype {d:?}; known: {KNOWN_DTYPES:?}"),
             Self::UnknownLayout(l) => write!(f, "unknown layout {l:?}; known: {KNOWN_LAYOUTS:?}"),
             Self::BadWarmup(w) => write!(f, "bench.warmup {w:?} must be \"auto\" or a number"),
+            Self::BadCudaGraph(g) => {
+                write!(
+                    f,
+                    "bench.cuda_graph {g:?} must be \"auto\", \"on\" or \"off\""
+                )
+            }
+            Self::ZeroMinSamples => f.write_str("bench.min_samples must be greater than zero"),
             Self::UnknownShapeLibrary(n) => write!(
                 f,
                 "unknown shape library {n:?}; known: {:?}",
@@ -245,6 +259,12 @@ pub fn expand(spec_json: &str) -> Result<Vec<Cell>, SpecError> {
         if w != "auto" {
             return Err(SpecError::BadWarmup(w.clone()));
         }
+    }
+    if !matches!(spec.bench.cuda_graph.as_str(), "auto" | "on" | "off") {
+        return Err(SpecError::BadCudaGraph(spec.bench.cuda_graph.clone()));
+    }
+    if spec.bench.min_samples == 0 {
+        return Err(SpecError::ZeroMinSamples);
     }
 
     let shapes: Vec<Shape> = match &spec.shapes {
@@ -389,6 +409,21 @@ mod tests {
             ),
             Err(SpecError::BadShape(_))
         ));
+        assert_eq!(
+            expand(&spec_json(r#"["bf16"]"#, r#","layouts":[]"#)),
+            Err(SpecError::EmptyLayouts)
+        );
+        assert_eq!(
+            expand(&spec_json(
+                r#"["bf16"]"#,
+                r#","bench":{"cuda_graph":"banana"}"#
+            )),
+            Err(SpecError::BadCudaGraph("banana".to_string()))
+        );
+        assert_eq!(
+            expand(&spec_json(r#"["bf16"]"#, r#","bench":{"min_samples":0}"#)),
+            Err(SpecError::ZeroMinSamples)
+        );
     }
 
     #[test]
@@ -397,15 +432,22 @@ mod tests {
         assert!(expand(&spec_json(r#"["bf16"]"#, r#","bench":{"warmup":25}"#)).is_ok());
     }
 
+    /// The canonical Appendix-D spec, as JSON. `crates/caliper-core/tests/spec/
+    /// appendix_d.yaml` is the same spec authored as YAML; the Python test loads
+    /// that file and must produce the same golden cell list this one pins.
+    const APPENDIX_D_JSON: &str = r#"{"schema_version":1,"target":"corpus:gemm",
+        "dtypes":["bf16","fp16","fp8_e4m3"],"layouts":["row","col"],
+        "shapes":"llm-7b",
+        "bench":{"warmup":"auto","min_samples":200,"flush_l2":true,"lock_clocks":true,"cuda_graph":"auto"},
+        "autotune":"from_kernel",
+        "output":{"parquet":"results/gemm-sweep.parquet","resume":true}}"#;
+
     #[test]
-    fn the_appendix_d_example_expands_to_36_unique_cells() {
-        let json = r#"{"schema_version":1,"target":"corpus:gemm",
-            "dtypes":["bf16","fp16","fp8_e4m3"],"layouts":["row","col"],
-            "shapes":"llm-7b",
-            "bench":{"warmup":"auto","min_samples":200,"flush_l2":true,"lock_clocks":true,"cuda_graph":"auto"},
-            "autotune":"from_kernel",
-            "output":{"parquet":"results/gemm-sweep.parquet","resume":true}}"#;
-        let cells = expand(json).unwrap();
+    fn the_appendix_d_example_matches_the_golden_cell_list() {
+        let cells = expand(APPENDIX_D_JSON).unwrap();
+        let golden: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/spec/appendix_d.cells.json")).unwrap();
+        assert_eq!(serde_json::to_value(&cells).unwrap(), golden);
         assert_eq!(cells.len(), 3 * 2 * 6);
         let keys: HashSet<_> = cells.iter().map(Cell::key).collect();
         assert_eq!(keys.len(), cells.len());

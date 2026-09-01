@@ -33,9 +33,10 @@ classifiers = [
   "Topic :: Software Development :: Testing",
   "Topic :: System :: Benchmark",
 ]
-dependencies = ["pyyaml>=6"]
+dependencies = []
 
 [project.optional-dependencies]
+sweep = ["pyyaml>=6"]
 parquet = ["pyarrow>=15"]
 dev = [
   "pytest>=8",
@@ -43,6 +44,7 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
   "maturin>=1.7,<2",
+  "pyyaml>=6",
   "pyarrow>=15",
   "types-pyyaml>=6",
   "pyarrow-stubs",

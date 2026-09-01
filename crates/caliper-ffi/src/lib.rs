@@ -347,6 +347,15 @@ fn expand_spec(spec_json: &str) -> PyResult<String> {
     Ok(serde_json::to_string(&cells).expect("Vec<Cell> serialises"))
 }
 
+/// The stable `--resume` key for each cell in a JSON cell list. Raises
+/// ``ValueError`` on malformed input.
+#[pyfunction]
+fn spec_cell_keys(cells_json: &str) -> PyResult<Vec<String>> {
+    let cells: Vec<caliper_core::spec::Cell> = serde_json::from_str(cells_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid cells: {e}")))?;
+    Ok(cells.iter().map(caliper_core::spec::Cell::key).collect())
+}
+
 /// Given the JSON cell list and a JSON array of completed cell keys, return the
 /// cells still to run (`--resume`). Raises ``ValueError`` on malformed input.
 #[pyfunction]
@@ -495,6 +504,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint_is_complete, module)?)?;
     module.add_function(wrap_pyfunction!(expand_spec, module)?)?;
     module.add_function(wrap_pyfunction!(spec_pending, module)?)?;
+    module.add_function(wrap_pyfunction!(spec_cell_keys, module)?)?;
     module.add_function(wrap_pyfunction!(resolve_shape_library, module)?)?;
     module.add_function(wrap_pyfunction!(shape_library_names, module)?)?;
     module.add_function(wrap_pyfunction!(selftest_from_env, module)?)?;

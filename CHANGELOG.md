@@ -175,21 +175,27 @@ tagged release onward.
   validates the report) and a finalized `notebooks/dev.ipynb`; `CONTRIBUTING.md`
   documents the push -> Colab -> PR loop.
 - `caliper_core::shapes` -- named shape libraries for `sweep`: `square-pow2`
-  (baseline), `prime-odd` (remainder/tail paths), `llm-7b` / `llm-70b` (the
-  three GEMMs in a Llama-2 decoder layer at prefill lengths 512 / 2048).
-  `docs/shapes.md` records every number's source. Exposed as
+  (baseline), `prime-odd` (remainder/tail paths), `llm-7b` (3 GEMMs/layer,
+  MHA) and `llm-70b` (4 GEMMs/layer -- grouped-query attention gives a distinct
+  smaller K/V projection), at prefill lengths 512 / 2048. `docs/shapes.md`
+  records every number's source. Exposed as
   `caliper._core.{resolve_shape_library, shape_library_names}`.
 - `caliper_core::spec` + `caliper._spec` -- parse a `sweep` spec (Appendix D
   YAML; Python reads the YAML, Rust validates and expands) into the
   deduplicated cartesian product of dtypes x layouts x resolved shapes, with a
-  typed `SpecError` for every malformed field. `Cell::key` is the identity for
-  dedupe and `--resume`; `spec::pending` drops finished cells. A golden
-  `appendix_d.yaml` -> `appendix_d.cells.json` pins the expansion. New `pyyaml`
-  runtime dependency.
+  typed `SpecError` for every malformed field (unknown key, empty / unknown
+  dtype / layout, bad `warmup` / `cuda_graph`, zero `min_samples`, unknown
+  shape library, ...). `Cell::key` is the identity for dedupe and `--resume`;
+  `spec::pending` drops finished cells. A golden
+  `appendix_d.yaml` / `appendix_d.cells.json` pair pins the expansion from both
+  the Python (YAML) and Rust (JSON) sides. PyYAML is an optional dependency
+  (`caliper[sweep]`).
 - `caliper.Grid` -- a table of `Result` rows: `.to_json()` / `.from_json()`
   (nested shape), `.to_parquet()` / `.from_parquet()` (one flattened row per
-  measurement + a derived `toolchain_hash` column, per Appendix C; needs the
-  `caliper[parquet]` extra), and `.filter()` into a smaller `Grid`.
+  measurement + a `toolchain_hash` column -- sha256 of the sorted toolkit map
+  and driver, per Appendix C; needs the `caliper[parquet]` extra), and
+  `.filter()` into a smaller `Grid`.
 - `caliper validate <file>` -- check every record in a `.json` / `.jsonl` /
-  `.parquet` results file against the schema; exit 1 on any invalid row.
-  `caliper.validate_records()` returns the report.
+  `.parquet` results file against the schema; exit 1 on any schema-invalid or
+  wrong-typed row, exit 2 on an unreadable file. `caliper.validate_records()`
+  returns the report.

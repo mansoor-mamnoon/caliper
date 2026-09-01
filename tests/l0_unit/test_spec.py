@@ -32,6 +32,18 @@ def test_yaml_text_and_dict_are_accepted_too() -> None:
     assert len(from_text) == 5  # one dtype, default layout, 5 square-pow2 shapes
 
 
+def test_inline_attention_shapes_expand() -> None:
+    cells = _spec.load_cells(
+        {
+            "target": "attn.py::flash",
+            "dtypes": ["bf16"],
+            "shapes": [{"kind": "attn", "b": 1, "h": 32, "s": 2048, "d": 128}],
+        }
+    )
+    assert len(cells) == 1
+    assert cells[0]["shape"] == {"kind": "attn", "b": 1, "h": 32, "s": 2048, "d": 128}
+
+
 def test_inline_shapes_are_deduped() -> None:
     cells = _spec.load_cells(
         {
@@ -59,7 +71,26 @@ def test_inline_shapes_are_deduped() -> None:
         ),
         ({"target": "k", "dtypes": ["bf16"], "shapes": "llm-9000b"}, "shape library"),
         ({"target": "k", "dtypes": [], "shapes": "square-pow2"}, "dtypes"),
+        ({"target": "k", "dtypes": ["bf16"], "layouts": [], "shapes": "square-pow2"}, "layouts"),
         ({"target": "k", "dtypes": ["bf16"], "shapes": []}, "zero cells"),
+        (
+            {
+                "target": "k",
+                "dtypes": ["bf16"],
+                "shapes": "square-pow2",
+                "bench": {"cuda_graph": "x"},
+            },
+            "cuda_graph",
+        ),
+        (
+            {
+                "target": "k",
+                "dtypes": ["bf16"],
+                "shapes": "square-pow2",
+                "bench": {"min_samples": 0},
+            },
+            "min_samples",
+        ),
     ],
 )
 def test_a_bad_spec_is_a_typed_value_error(spec: dict[str, Any], needle: str) -> None:
@@ -69,12 +100,8 @@ def test_a_bad_spec_is_a_typed_value_error(spec: dict[str, Any], needle: str) ->
 
 def test_resume_drops_finished_cells() -> None:
     cells = _spec.load_cells({"target": "k", "dtypes": ["bf16", "fp16"], "shapes": "square-pow2"})
-    done = [
-        f"{c['target']}|{c['dtype']}|{c['layout']}|"
-        f"gemm(m={c['shape']['m']},n={c['shape']['n']},k={c['shape']['k']})"
-        for c in cells[:3]
-    ]
-    left = _spec.pending_cells(cells, done)
+    keys = _spec.cell_keys(cells)
+    left = _spec.pending_cells(cells, keys[:3])
     assert len(left) == len(cells) - 3
-    left_again = _spec.pending_cells(cells, done + [d for d in done])  # idempotent
+    left_again = _spec.pending_cells(cells, keys[:3] + keys[:3])  # idempotent
     assert len(left_again) == len(cells) - 3

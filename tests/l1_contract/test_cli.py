@@ -162,6 +162,25 @@ def test_validate_a_bad_json_file_exits_one(tmp_path: Path) -> None:
     assert main(["validate", str(p)]) == 1
 
 
+def test_validate_a_wrong_typed_field_is_an_invalid_row_not_a_read_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from caliper import Result
+
+    rec = Result.default().to_dict()
+    rec["timing"]["p50_us"] = "not a number"
+    p = tmp_path / "g.json"
+    p.write_text(json.dumps([rec]))
+    code = main(["validate", str(p), "--json"])
+    assert code == 1  # invalid row, not exit 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["problems"][0]["row"] == 0
+
+
+def test_validate_a_missing_file_exits_two() -> None:
+    assert main(["validate", "/no/such/file.json"]) == 2
+
+
 def test_selftest_without_a_gpu_is_an_error_report(capsys: pytest.CaptureFixture[str]) -> None:
     from caliper import _core
 

@@ -71,7 +71,7 @@ pub fn resolve(name: &str) -> Option<Vec<Shape>> {
             gemm(8192, 8192, 8192),
         ],
         // Odd / prime square GEMMs -- exercise remainder loops and unaligned
-        // tails that power-of-two shapes never hit.
+        // tails that power-of-two shapes never hit. Every dim is prime.
         "prime-odd" => vec![
             gemm(257, 257, 257),
             gemm(383, 383, 383),
@@ -81,24 +81,33 @@ pub fn resolve(name: &str) -> Option<Vec<Shape>> {
             gemm(4093, 4093, 4093),
         ],
         // The GEMMs in one Llama-2-7B decoder layer (hidden 4096, MLP 11008),
-        // at prefill sequence lengths 512 and 2048, batch 1. See docs/shapes.md.
-        "llm-7b" => llm_layer(4096, 11008, &[512, 2048]),
-        // Llama-2-70B decoder layer (hidden 8192, MLP 28672).
-        "llm-70b" => llm_layer(8192, 28672, &[512, 2048]),
+        // multi-head attention, at prefill sequence lengths 512 and 2048,
+        // batch 1. See docs/shapes.md.
+        "llm-7b" => llm_layer(4096, 11008, 4096, &[512, 2048]),
+        // Llama-2-70B decoder layer (hidden 8192, MLP 28672). Grouped-query
+        // attention: 64 query heads, 8 KV heads of dim 128 -> the K/V
+        // projection is `hidden -> 1024`, distinct from the `hidden -> hidden`
+        // Q/output projection.
+        "llm-70b" => llm_layer(8192, 28672, 8 * 128, &[512, 2048]),
         _ => return None,
     };
     Some(shapes)
 }
 
-/// The three distinct GEMMs in a transformer decoder layer, per sequence
-/// length: attention projection `(s, hidden) x (hidden, hidden)`, MLP up/gate
-/// `(s, hidden) x (hidden, ffn)`, and MLP down `(s, ffn) x (ffn, hidden)`.
-fn llm_layer(hidden: u64, ffn: u64, seq_lens: &[u64]) -> Vec<Shape> {
+/// The distinct GEMMs in a transformer decoder layer, per sequence length:
+/// Q / output projection `(s, hidden) x (hidden, hidden)`; the K/V projection
+/// `(s, hidden) x (hidden, kv_dim)` when grouped-query attention makes it
+/// smaller than `hidden`; MLP up/gate `(s, hidden) x (hidden, ffn)`; MLP down
+/// `(s, ffn) x (ffn, hidden)`.
+fn llm_layer(hidden: u64, ffn: u64, kv_dim: u64, seq_lens: &[u64]) -> Vec<Shape> {
     let mut out = Vec::new();
     for &s in seq_lens {
-        out.push(gemm(s, hidden, hidden)); // qkv / o projection
-        out.push(gemm(s, ffn, hidden)); // mlp up / gate
-        out.push(gemm(s, hidden, ffn)); // mlp down
+        out.push(gemm(s, hidden, hidden)); // Q / output projection
+        if kv_dim != hidden {
+            out.push(gemm(s, kv_dim, hidden)); // grouped K / V projection
+        }
+        out.push(gemm(s, ffn, hidden)); // MLP up / gate
+        out.push(gemm(s, hidden, ffn)); // MLP down
     }
     out
 }
@@ -144,18 +153,19 @@ mod tests {
     }
 
     #[test]
-    fn llm_libraries_have_three_gemms_per_sequence_length() {
-        for name in ["llm-7b", "llm-70b"] {
-            let s = resolve(name).unwrap();
-            assert_eq!(s.len(), 6, "{name}"); // 3 gemms x 2 seq lengths
-        }
-        // llm-7b: hidden 4096, ffn 11008
-        assert!(resolve("llm-7b")
-            .unwrap()
-            .contains(&gemm(2048, 11008, 4096)));
-        assert!(resolve("llm-70b")
-            .unwrap()
-            .contains(&gemm(512, 8192, 28672)));
+    fn llm_libraries_cover_the_layer_gemms_per_sequence_length() {
+        // llm-7b is MHA: 3 distinct gemms per seq length.
+        let s7 = resolve("llm-7b").unwrap();
+        assert_eq!(s7.len(), 6);
+        assert!(s7.contains(&gemm(2048, 11008, 4096))); // mlp up, hidden 4096
+        assert!(s7.contains(&gemm(2048, 4096, 11008))); // mlp down
+
+        // llm-70b is GQA: the K/V projection is a 4th, smaller gemm.
+        let s70 = resolve("llm-70b").unwrap();
+        assert_eq!(s70.len(), 8);
+        assert!(s70.contains(&gemm(512, 8192, 8192))); // Q / output projection
+        assert!(s70.contains(&gemm(512, 1024, 8192))); // grouped K/V projection (8*128)
+        assert!(s70.contains(&gemm(512, 8192, 28672))); // mlp down
     }
 
     #[test]
