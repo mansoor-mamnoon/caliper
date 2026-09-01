@@ -15,60 +15,76 @@ right by default, and reports enough context alongside each number
 (achieved vs. peak, register spills, occupancy, launch overhead, clock state)
 that you can tell whether to trust it.
 
-> **Status: early development.** This repository currently contains the project
-> scaffold: a Rust measurement core, its Python bindings, the result schema, and
-> continuous integration. The measurement engine is being built next. APIs and
-> output formats will change until the first tagged release.
+> **Status: early development.** The measurement engine, result schema, roofline
+> and occupancy models, `ptxas` parsing, the sweep planner, the `do_bench` shim,
+> and the command-line tool are built and tested. The on-device launcher (real
+> CUDA events, NVML clock locking, the reference kernels) runs on a CUDA host and
+> is validated on Google Colab; on a machine without a GPU everything works
+> against recorded device sessions. APIs and output formats will change until the
+> first tagged release.
 
-## What it will do
+## What it does
 
-- **Time a kernel honestly** -- steady-state warmup, architecture-aware L2 cache
+- **Times a kernel honestly** -- steady-state warmup, architecture-aware L2 cache
   flushing, GPU clock locking, thermal/power throttle detection with automatic
-  discarding of bad samples, and a real latency distribution (p10 / p50 / p90 +
-  spread) rather than one mean.
-- **Handle short kernels** -- measure a batch of back-to-back launches between
+  discarding of bad samples, and a real latency distribution (p10 / p50 / p90,
+  mean, min/max, spread) rather than one mean.
+- **Handles short kernels** -- measures a batch of back-to-back launches between
   two events instead of synchronising after each one, so a 5-microsecond kernel
-  isn't reported as 50.
-- **Explain the number** -- achieved throughput vs. the hardware roofline for the
-  dtype, arithmetic intensity, whether the kernel is compute- or memory-bound,
-  register and shared-memory usage, spill counts, occupancy, and the CPU-side
-  launch overhead.
-- **Sweep a matrix** -- run one kernel across shapes, dtypes, memory layouts, and
-  autotune configurations and write a stable, machine-readable results file.
-- **Catch regressions** -- compare two results files and flag the ones that moved
-  outside the measurement noise, with the register/occupancy delta that explains
-  why.
-- **Check itself** -- a `selftest` command validates an install against
-  on-device reference workloads whose correct answers are known from first
-  principles, and cross-checks against Nsight Systems where it's available.
+  isn't reported as 50; `cuda_graph="auto"` captures the batch into a graph when
+  the launch overhead would otherwise dominate.
+- **Explains the number** -- achieved throughput vs. the hardware roofline for the
+  dtype (a cited per-architecture peaks table), arithmetic intensity, whether the
+  kernel is compute-, memory-, or latency-bound, register and shared-memory
+  usage, spill counts, theoretical occupancy, and the CPU-side launch overhead.
+- **Sweeps a matrix** -- runs one kernel across shapes, dtypes, and memory
+  layouts (named shape libraries or an inline list), checkpoints after every
+  cell, and resumes a killed run without re-measuring what finished. Results go
+  to a stable Parquet or JSON file.
+- **Checks itself** -- `caliper selftest` runs on-device reference workloads
+  whose correct answers are known from first principles and reports `PASS` /
+  `FAIL` / `ERROR` with a coverage note; `caliper validate` checks a results file
+  against the schema.
+- **Is Triton-compatible** -- `caliper.do_bench` matches `triton.testing.do_bench`
+  argument for argument, so a script can swap the import.
 
 ## How it's built
 
 | Layer | Language | What lives here |
 | --- | --- | --- |
-| `crates/caliper-core` | Rust | All measurement logic: the result schema, statistics, the roofline model, `ptxas` parsing, the regression threshold model. No GPU or Python dependency; tested with `cargo test`. |
+| `crates/caliper-core` | Rust | All measurement logic: the result schema, statistics, steady-state detection, the reduction pipeline, the roofline and occupancy models, `ptxas` / `cuobjdump` / HIP parsing, the sweep spec parser, the autotune cache key, the oracle checks and the `selftest` report. No GPU or Python dependency; tested with `cargo test`. |
+| `crates/caliper-gpu` | Rust | The device layer: three ports (launch, clocks, device info, module probe), a fixture player that replays a recorded session with no GPU, a recorder, and the feature-gated real CUDA/NVML implementations. |
 | `crates/caliper-ffi` | Rust (PyO3) | A thin binding layer that exposes the core to Python as `caliper._core`. |
-| GPU layer *(coming)* | Rust + a small amount of CUDA C++ | Kernel launch, CUDA events and graphs, NVML clock control, and the on-device reference kernels. |
-| `python/caliper` | Python | The public API, the command-line tool, and the Triton-compatible `do_bench` shim. |
+| `python/caliper` | Python | The public API, the command-line tool, the `do_bench` shim, YAML/Parquet I/O, and orchestration (`sweep`). |
+| `crates/caliper-gpu/kernels` *(Colab)* | CUDA C++ | The on-device oracle kernels O1-O7. |
 
 The full interface, data schema, and validation strategy are written up in
 [`docs/plan.md`](docs/plan.md).
 
-## Planned interface
+## Interface
 
 ```python
-from caliper import bench
+from caliper import bench, do_bench, sweep
 
-result = bench(lambda: my_kernel(a, b))
+# one kernel, from a recorded device session (a live callable needs a CUDA host)
+result = bench("corpus:gemm", recording=open("session.jsonl").read(),
+               shape={"M": 4096, "N": 4096, "K": 4096}, dtype="bf16")
 print(result.p50_us, result.roofline_pct, result.ptxas.spill_stores_bytes)
+
+# a Triton script only changes its import
+ms = do_bench(fn, quantiles=[0.5, 0.2, 0.8])
+
+# a matrix -> Parquet, resumable
+grid = sweep("spec.yaml")
 ```
 
 ```
-caliper doctor          # is this machine set up to produce trustworthy numbers?
-caliper bench k.py::fn   # measure one kernel
-caliper sweep spec.yaml  # run a matrix -> results file
-caliper compare --baseline a.parquet --candidate b.parquet
-caliper selftest         # validate this install against on-device references
+caliper doctor            # is this machine set up to produce trustworthy numbers?
+caliper fingerprint --check   # is the machine record complete?
+caliper bench corpus:o1 --recording session.jsonl
+caliper sweep spec.yaml --resume        # run a matrix -> results file
+caliper validate results.parquet        # check a results file against the schema
+caliper selftest --full                 # run the on-device oracle suite
 ```
 
 ## Install
@@ -83,8 +99,10 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"      # builds the Rust extension via maturin
 ```
 
-The library targets Linux with an NVIDIA GPU (CUDA 12.1+). The core and its
-tests have no GPU dependency and run anywhere.
+Optional extras: `caliper-gpu[sweep]` (PyYAML, for reading sweep specs) and
+`caliper-gpu[parquet]` (pyarrow, for `Grid.to_parquet` / `caliper validate` on
+`.parquet`). The library targets Linux with an NVIDIA GPU (CUDA 12.1+); the core
+and its tests have no GPU dependency and run anywhere.
 
 ## Development
 
@@ -103,7 +121,8 @@ make typecheck    # mypy
 
 Tests are tagged by what they need: `l0` (pure, no GPU), `l1` (against recorded
 device responses, no GPU), and `l2`/`l3`/`l4`/`l6` (require a real GPU). CI runs
-the Rust suite and the `l0`/`l1` Python tests on every push.
+the Rust suite and the `l0`/`l1` Python tests on every push; the GPU tiers run
+on Colab. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the push -> Colab -> PR loop.
 
 ## License
 

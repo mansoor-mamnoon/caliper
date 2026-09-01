@@ -199,3 +199,15 @@ tagged release onward.
   `.parquet` results file against the schema; exit 1 on any schema-invalid or
   wrong-typed row, exit 2 on an unreadable file. `caliper.validate_records()`
   returns the report.
+- `caliper_core::autotune::AutotuneKey` + `caliper._autotune.AutotuneCache` --
+  a per-autotune-config timing cache keyed by `(sku, driver, cuda, ptxas,
+  triton, torch, kernel_source_hash, canonical-config-JSON)`. Adding a config
+  invalidates only that config's key, so a re-sweep re-times just the new one.
+  The JSON-file store has hit/miss counters and an atomic flush.
+- `caliper.sweep(spec)` + `caliper sweep <spec.yaml>` -- expand a spec, run each
+  cell as one `bench()` call, and return a `Grid`. Each cell is checkpointed to
+  a `<output>.state.jsonl` sidecar and the Parquet/JSON output rewritten, so
+  `--resume` (or the spec's `output.resume`) continues a killed run without
+  re-measuring finished cells and keeps spec cell order. `run_cell=` overrides
+  how a cell is measured; the default replays a `<cell-key>.jsonl` recording
+  from `recordings_dir`.
