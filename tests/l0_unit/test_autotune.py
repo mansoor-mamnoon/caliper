@@ -25,12 +25,8 @@ def _machine(**over: Any) -> dict[str, Any]:
 
 
 def test_key_is_config_order_independent() -> None:
-    a = _core.autotune_key(
-        _json(_machine()), "src:abc", '{"BLOCK_M": 128, "num_warps": 8}'
-    )
-    b = _core.autotune_key(
-        _json(_machine()), "src:abc", '{"num_warps": 8, "BLOCK_M": 128}'
-    )
+    a = _core.autotune_key(_json(_machine()), "src:abc", '{"BLOCK_M": 128, "num_warps": 8}')
+    b = _core.autotune_key(_json(_machine()), "src:abc", '{"num_warps": 8, "BLOCK_M": 128}')
     assert a == b
     assert _core.autotune_config_canonical('{"b":1,"a":2}') == '{"a":2,"b":1}'
 

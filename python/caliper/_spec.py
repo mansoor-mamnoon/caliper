@@ -13,7 +13,7 @@ from typing import Any
 
 from caliper import _core
 
-__all__ = ["cell_keys", "load_cells", "pending_cells"]
+__all__ = ["cell_keys", "load_cells", "parse_spec", "pending_cells"]
 
 
 def _yaml_load(text: str) -> Any:
@@ -34,6 +34,13 @@ def _spec_to_json(spec: str | Path | dict[str, Any]) -> str:
     if not isinstance(parsed, dict):
         raise ValueError("a sweep spec must be a YAML mapping")
     return json.dumps(parsed)
+
+
+def parse_spec(spec: str | Path | dict[str, Any]) -> dict[str, Any]:
+    """The spec as a plain dict (``Path`` / YAML text / dict all accepted).
+    Does *not* validate -- use :func:`load_cells` for that."""
+    parsed: dict[str, Any] = json.loads(_spec_to_json(spec))
+    return parsed
 
 
 def load_cells(spec: str | Path | dict[str, Any]) -> list[dict[str, Any]]:

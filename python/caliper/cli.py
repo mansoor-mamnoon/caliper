@@ -1,9 +1,9 @@
 """Command-line entry point for caliper.
 
 Wired up so far: ``bench`` (recorded-session path), ``doctor``, ``fingerprint``,
-``selftest``, ``validate``, plus ``--version`` / ``--help``. Each command takes
-``--json`` for machine-readable output. The sweep / compare / submit commands
-are added as their supporting code lands.
+``selftest``, ``validate``, ``sweep``, plus ``--version`` / ``--help``. Most
+commands take ``--json`` for machine-readable output. The compare / submit
+commands are added as their supporting code lands.
 
 Exit codes: 0 success; 1 "not fit" (``doctor``) / "FAIL" (``selftest``);
 2 usage / runtime error / "ERROR" (``selftest``, including no device).
@@ -65,6 +65,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_val = sub.add_parser("validate", help="check a results file against the schema")
     p_val.add_argument("path", metavar="FILE", help="a .json / .jsonl / .parquet results file")
     p_val.add_argument("--json", action="store_true", help="print the report as JSON")
+
+    p_sw = sub.add_parser("sweep", help="run a sweep spec into a results file")
+    p_sw.add_argument("spec", metavar="SPEC", help="a sweep spec YAML file")
+    p_sw.add_argument("--recordings", metavar="DIR", help="dir of <cell-key>.jsonl recordings")
+    p_sw.add_argument("--parquet", metavar="PATH", help="override the spec's parquet output")
+    p_sw.add_argument("--json-out", metavar="PATH", help="also write a JSON results file")
+    p_sw.add_argument(
+        "--resume", action="store_true", help="continue from the .state.jsonl sidecar"
+    )
 
     return parser
 
@@ -189,6 +198,22 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0 if report["ok"] else 1
 
 
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    try:
+        grid = api.sweep(
+            Path(args.spec),
+            recordings_dir=args.recordings,
+            parquet=args.parquet,
+            json_out=args.json_out,
+            resume=args.resume or None,
+        )
+    except (ValueError, OSError, NotImplementedError) as exc:
+        print(f"caliper sweep: {exc}", file=sys.stderr)
+        return 2
+    print(f"caliper sweep: {len(grid)} cell(s) measured")
+    return 0
+
+
 def _recording_text(args: argparse.Namespace) -> str | None:
     return Path(args.recording).read_text() if args.recording else None
 
@@ -211,6 +236,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_selftest(args)
     if args.command == "validate":
         return _cmd_validate(args)
+    if args.command == "sweep":
+        return _cmd_sweep(args)
     parser.print_help(sys.stderr)  # pragma: no cover - argparse rejects unknowns first
     return 2
 

@@ -15,6 +15,21 @@ from typing import Any
 
 from caliper import _core
 from caliper._record import Result
+from caliper._sweep import sweep
+
+__all__ = [
+    "SELFTEST_EXIT_CODE",
+    "bench",
+    "do_bench",
+    "doctor",
+    "doctor_text",
+    "fingerprint",
+    "fingerprint_check",
+    "selftest",
+    "sweep",
+    "toolchain",
+    "validate_records",
+]
 
 _GRAPH_MODES = ("auto", "on", "off")
 
