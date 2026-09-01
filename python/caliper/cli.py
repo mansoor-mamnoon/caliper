@@ -1,11 +1,12 @@
 """Command-line entry point for caliper.
 
 Wired up so far: ``bench`` (recorded-session path), ``doctor``, ``fingerprint``,
-plus ``--version`` / ``--help``. Each command takes ``--json`` for
-machine-readable output. The sweep / compare / selftest / validate / submit
-commands are added as their supporting code lands.
+``selftest``, plus ``--version`` / ``--help``. Each command takes ``--json`` for
+machine-readable output. The sweep / compare / validate / submit commands are
+added as their supporting code lands.
 
-Exit codes: 0 success, 1 "not fit" (doctor only), 2 usage / runtime error.
+Exit codes: 0 success; 1 "not fit" (``doctor``) / "FAIL" (``selftest``);
+2 usage / runtime error / "ERROR" (``selftest``, including no device).
 """
 
 from __future__ import annotations
@@ -59,7 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also run O5 (cuBLAS) and the nsys cross-check",
     )
-    p_st.add_argument("--json", action="store_true")
+    p_st.add_argument("--json", action="store_true", help="print the Appendix-E report as JSON")
 
     return parser
 
@@ -157,14 +158,14 @@ def _cmd_fingerprint(args: argparse.Namespace) -> int:
 def _cmd_selftest(args: argparse.Namespace) -> int:
     report = api.selftest(full=args.full)
     if args.json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps(report, indent=2))  # pure Appendix-E, no extra keys
     else:
         print(f"caliper selftest: {report['result']}  (coverage: {report['coverage']})")
         for check in report["checks"]:
             print(f"  {check['status']:5}  {check['name']:24} {check['detail']}")
         if report["not_validated"]:
             print(f"  not validated here: {', '.join(report['not_validated'])}")
-    return int(report["exit_code"])
+    return api.SELFTEST_EXIT_CODE.get(report["result"], 2)
 
 
 def _recording_text(args: argparse.Namespace) -> str | None:

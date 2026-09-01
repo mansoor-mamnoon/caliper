@@ -148,6 +148,6 @@ def test_selftest_without_a_gpu_is_an_error_report(capsys: pytest.CaptureFixture
     report = json.loads(capsys.readouterr().out)
     assert report["result"] == "ERROR"
     assert report["coverage"] == "reduced"
-    assert "vs_nsys" in report["not_validated"]
-    assert report.pop("exit_code") == 2
+    assert "exit_code" not in report  # the --json body is pure Appendix E
+    assert set(report["not_validated"]) == {"clock_lock", "ncu_crosscheck", "powercap_throttle"}
     assert _core.validate_selftest_json(json.dumps(report)) == []

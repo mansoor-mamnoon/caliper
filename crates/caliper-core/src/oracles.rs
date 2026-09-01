@@ -302,11 +302,11 @@ pub fn check_o6_throttle(invalidated_samples: u64, throttle_reasons: &[String]) 
 
 // --- O7: calibration GEMM (community-submission trust gate) ------------------
 
-/// The locked-clock `p50` (microseconds) of the fixed `calibration_gemm`
-/// (2048^3 bf16) for a SKU. `None` for a SKU not yet in the checked-in table.
+/// The locked-clock `p50` (microseconds) of the fixed `calibration_gemm` (a
+/// fixed cuBLAS bf16 GEMM) for a SKU. `None` for a SKU not yet in the table.
 ///
-/// The table is seeded and grows as each SKU is measured on locked clocks at
-/// acceptance time.
+/// The table is empty until each SKU's locked-clock `p50` is *measured* at
+/// acceptance time (a placeholder here would be a false trust anchor).
 #[must_use]
 pub fn calibration_gemm_p50_us(arch: &str) -> Option<f64> {
     let tag: String = arch
@@ -317,41 +317,33 @@ pub fn calibration_gemm_p50_us(arch: &str) -> Option<f64> {
         .chars()
         .take_while(char::is_ascii_digit)
         .collect();
+    // Entries are added per SKU from a measured locked-clock run, e.g.
+    //   "80" => Some(<measured Colab A100-40GB p50 us>),
+    // The table is empty until acceptance -- O7 SKIPs on every SKU for now.
+    #[allow(clippy::match_single_binding)]
     match tag.as_str() {
-        // source: Colab A100-40GB, clocks locked, calibration_gemm 2048^3 bf16
-        // -- provisional seed from the plan's selftest example; replaced with
-        // the measured value at Week-2 acceptance.
-        "80" => Some(1790.0),
         _ => None,
     }
 }
 
 /// Check O7: on locked clocks the calibration GEMM's `p50` is within 8% of the
 /// SKU's table value (Appendix: +-8% -> `verified`, else `clocks-suspect`).
-/// A SKU not in the table cannot be checked -- the caller should skip it.
+///
+/// Returns `None` for a SKU with no table entry -- the caller reports that
+/// check as `SKIP`, not as a failure.
 #[must_use]
-pub fn check_o7_calibration_gemm(measured_p50_us: f64, arch: &str) -> OracleCheck {
-    match calibration_gemm_p50_us(arch) {
-        Some(reference) => {
-            let check =
-                OracleCheck::within("o7_calibration_gemm", measured_p50_us, reference, 0.08);
-            let verdict = if check.passed {
-                "verified"
-            } else {
-                "clocks-suspect"
-            };
-            OracleCheck {
-                detail: format!("{} -> {verdict}", check.detail),
-                ..check
-            }
-        }
-        None => OracleCheck::boolean(
-            "o7_calibration_gemm",
-            false,
-            measured_p50_us,
-            format!("no calibration_gemm table entry for {arch:?}"),
-        ),
-    }
+pub fn check_o7_calibration_gemm(measured_p50_us: f64, arch: &str) -> Option<OracleCheck> {
+    let reference = calibration_gemm_p50_us(arch)?;
+    let check = OracleCheck::within("o7_calibration_gemm", measured_p50_us, reference, 0.08);
+    let verdict = if check.passed {
+        "verified"
+    } else {
+        "clocks-suspect"
+    };
+    Some(OracleCheck {
+        detail: format!("{} -> {verdict}", check.detail),
+        ..check
+    })
 }
 
 #[cfg(test)]
@@ -448,21 +440,25 @@ mod tests {
     }
 
     #[test]
-    fn o7_calibration_gemm_is_within_eight_percent_of_the_sku_table() {
-        assert_eq!(calibration_gemm_p50_us("sm_80"), Some(1790.0));
-        assert_eq!(calibration_gemm_p50_us("sm_90"), None);
+    fn o7_calibration_gemm_is_within_eight_percent_when_the_sku_is_in_the_table() {
+        // The table ships empty until a SKU is measured at acceptance.
+        assert_eq!(calibration_gemm_p50_us("sm_80"), None);
+        assert!(check_o7_calibration_gemm(1800.0, "sm_80").is_none());
 
-        let ok = check_o7_calibration_gemm(1850.0, "sm_80"); // +3.4%
-        assert!(ok.passed);
-        assert!(ok.detail.contains("verified"));
-
-        let bad = check_o7_calibration_gemm(2100.0, "sm_80"); // +17%
-        assert!(!bad.passed);
-        assert!(bad.detail.contains("clocks-suspect"));
-
-        // a SKU with no table entry cannot pass
-        let unknown = check_o7_calibration_gemm(1800.0, "sm_120");
-        assert!(!unknown.passed);
-        assert!(unknown.detail.contains("no calibration_gemm table entry"));
+        // Once an entry exists, +-8% -> verified, else clocks-suspect. Exercise
+        // the check logic directly against a synthetic reference.
+        let synthetic = |measured: f64, reference: f64| {
+            let c = OracleCheck::within("o7_calibration_gemm", measured, reference, 0.08);
+            (
+                c.passed,
+                if c.passed {
+                    "verified"
+                } else {
+                    "clocks-suspect"
+                },
+            )
+        };
+        assert_eq!(synthetic(1850.0, 1790.0), (true, "verified")); // +3.4%
+        assert_eq!(synthetic(2100.0, 1790.0), (false, "clocks-suspect")); // +17%
     }
 }

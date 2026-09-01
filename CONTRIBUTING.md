@@ -32,17 +32,21 @@ suite, `nsys` / `ncu` cross-checks) runs on Colab, not in CI. The loop:
    works). It bootstraps Rust + `nsys`, pulls your branch, then runs, in order:
    - `cargo test --all --all-features` and `pytest -m "l0 or l1"` (a smoke
      re-run of what CI already checked),
-   - `pytest -m "l2 or l6"` and the `--features cuda` Rust tests,
+   - `pytest -m "l2 or l4 or l6"` (on-device oracles, unlocked reproducibility,
+     end-to-end) and the `--features cuda` Rust tests,
    - `caliper doctor`, `caliper fingerprint --check`, and
      `caliper selftest --full`.
 3. **Paste the pass/fail tail** of each cell into the PR description.
 4. For an acceptance milestone, also run **`notebooks/selftest.ipynb`** and
-   **commit `selftest-report.json`** — it must `validate` (the notebook checks
-   this) and, on an A100 without `nsys`, read `PASS` / `coverage: reduced` with
-   `vs_nsys` (and `o5_cublas_gemm`) in `not_validated`.
+   **commit `selftest-report.json`**. It must `validate` (the notebook checks
+   this). Once the on-device oracle runner lands, an A100 without `nsys` reads
+   `PASS` / `coverage: reduced` with
+   `not_validated: [clock_lock, ncu_crosscheck, powercap_throttle]`; until then a
+   device-present run is `ERROR` (every oracle skipped) and the notebook cell
+   fails — that is expected.
 
 `caliper selftest` exit codes: `0` PASS, `1` FAIL, `2` ERROR (including "no
-device").
+device", and — for now — "device present, oracle runner not yet wired").
 
 ## Conventions
 

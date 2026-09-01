@@ -327,19 +327,20 @@ def fingerprint_check(
     return report
 
 
-_SELFTEST_EXIT = {"PASS": 0, "FAIL": 1, "ERROR": 2}
+SELFTEST_EXIT_CODE = {"PASS": 0, "FAIL": 1, "ERROR": 2}
 
 
 def selftest(*, full: bool = False) -> dict[str, Any]:
     """Run the oracle self-test against the ``CALIPER_GPU_PORTS`` backend.
 
-    Returns the Appendix-E report as a dict, with an added ``exit_code``
-    (0 PASS / 1 FAIL / 2 ERROR). With no CUDA device this is the ``ERROR`` /
-    no-device report. ``full`` also runs O5 (cuBLAS) and the ``nsys``
-    cross-check; the on-device oracle runner itself lands on a CUDA host.
+    Returns the Appendix-E report as a dict (no extra keys -- map ``result``
+    through :data:`SELFTEST_EXIT_CODE` for a process exit code). With no CUDA
+    device this is the ``ERROR`` / no-device report. ``full`` also runs O5
+    (cuBLAS) and the ``nsys`` cross-check; the on-device oracle runner itself
+    lands on a CUDA host, so until it does a device-present run is still an
+    ``ERROR`` (every oracle skipped).
     """
     report: dict[str, Any] = json.loads(_core.selftest_from_env(full))
-    report["exit_code"] = _SELFTEST_EXIT.get(report["result"], 2)
     return report
 
 

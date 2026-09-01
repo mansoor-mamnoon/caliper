@@ -343,22 +343,26 @@ fn fingerprint_is_complete(machine_json: &str) -> PyResult<bool> {
 /// on-device oracle runner itself lands on a CUDA host.
 #[pyfunction]
 fn selftest_from_env(full: bool) -> String {
-    use caliper_core::selftest::{SelftestCheck, SelftestReport, CHECK_NAMES};
-
-    // A usable device means `snapshot()` succeeds. Without one (no `cuda`
-    // build, no GPU) fall to the no-device report -- matches `doctor` /
-    // `fingerprint`.
-    let machine = match caliper_gpu::open_from_env().and_then(|mut h| h.snapshot()) {
-        Ok(m) => m,
-        Err(_) => return SelftestReport::no_device().to_json(),
+    use caliper_core::selftest::{
+        SelftestCheck, SelftestReport, CHECK_NAMES, NOT_VALIDATED_TOKENS,
     };
 
+    // A usable device means `snapshot()` succeeds. Without one (no `cuda`
+    // build, no GPU) fall to the no-device report -- matches `fingerprint`.
+    let machine = match caliper_gpu::open_from_env().and_then(|mut h| h.snapshot()) {
+        Ok(m) => m,
+        Err(_) => return SelftestReport::no_device(full).to_json(),
+    };
+
+    // A device is present, but the on-device oracle runner lands on a CUDA
+    // host. Until it does, every oracle is skipped -- so this is an `ERROR`
+    // (nothing was validated), honestly.
     let mut checks = vec![SelftestCheck::pass(
         "device_present",
         "a CUDA device is present",
     )];
     for name in CHECK_NAMES {
-        if !full && (*name == "o5_cublas_gemm" || *name == "vs_nsys") {
+        if !full && matches!(*name, "o5_cublas_gemm" | "vs_nsys") {
             continue;
         }
         checks.push(SelftestCheck::skip(
@@ -366,18 +370,34 @@ fn selftest_from_env(full: bool) -> String {
             "on-device oracle runner runs on a CUDA host",
         ));
     }
-    SelftestReport::assemble(machine, checks).to_json()
+    SelftestReport::assemble(
+        machine,
+        checks,
+        NOT_VALIDATED_TOKENS
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+    )
+    .to_json()
 }
 
-/// Assemble a selftest report from a machine document and a JSON array of
-/// check objects. Raises ``ValueError`` on malformed input.
+/// Assemble a selftest report from a machine document, a JSON array of check
+/// objects, and a JSON array of `not_validated` capability tokens. Raises
+/// ``ValueError`` on malformed input.
 #[pyfunction]
-fn selftest_assemble(machine_json: &str, checks_json: &str) -> PyResult<String> {
+#[pyo3(signature = (machine_json, checks_json, not_validated_json="[]"))]
+fn selftest_assemble(
+    machine_json: &str,
+    checks_json: &str,
+    not_validated_json: &str,
+) -> PyResult<String> {
     let machine: schema::Machine = serde_json::from_str(machine_json)
         .map_err(|e| PyValueError::new_err(format!("invalid machine: {e}")))?;
     let checks: Vec<caliper_core::selftest::SelftestCheck> = serde_json::from_str(checks_json)
         .map_err(|e| PyValueError::new_err(format!("invalid checks: {e}")))?;
-    Ok(caliper_core::selftest::SelftestReport::assemble(machine, checks).to_json())
+    let not_validated: Vec<String> = serde_json::from_str(not_validated_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid not_validated: {e}")))?;
+    Ok(caliper_core::selftest::SelftestReport::assemble(machine, checks, not_validated).to_json())
 }
 
 /// Structural validation of a selftest report document. Returns a list of

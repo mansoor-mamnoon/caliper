@@ -153,19 +153,24 @@ tagged release onward.
   `graph-captured` / `graph-eager` flag, from the launcher's own report
   (`RawSamples.graph_used` / `single_launch_us`) or the policy.
 - `caliper_core::selftest` + `caliper selftest [--full] [--json]` -- the
-  Appendix-E oracle self-test report: `SelftestReport::assemble` folds the O1-O7
-  / reproducibility / (`--full`) O5 + `nsys` checks into a `PASS` / `FAIL` /
-  `ERROR` (a suite that validated nothing is an `ERROR`), a `full` / `reduced`
-  coverage, and a `not_validated` list. `validate()` re-derives those fields and
-  flags a tampered report. Exit codes 0 / 1 / 2; with no device the CLI emits
-  the `no_device` `ERROR` report. Exposed as `caliper.selftest()` and
-  `caliper._core.{selftest_from_env, selftest_assemble, validate_selftest_json}`.
-  The on-device oracle runner (real `bench()` -> the checks) lands on a CUDA
-  host.
-- `caliper_core::oracles` gains O7: `check_o7_calibration_gemm` compares a
-  locked-clock calibration-GEMM `p50` against a per-SKU table
-  (`calibration_gemm_p50_us`, seeded for `sm_80`) within +-8%
-  (`verified` / `clocks-suspect`).
+  Appendix-E oracle self-test report: `SelftestReport::assemble` scores the
+  O1-O7 / reproducibility / (`--full`) O5 + `nsys` checks (context lines like
+  `device_present` do not count) into a `PASS` / `FAIL` / `ERROR` -- a run where
+  no scored check passed is an `ERROR`, a `reduced`-coverage run with every
+  runnable check passing is still a `PASS`. `coverage` is `full` only when the
+  `nsys` cross-check ran; `not_validated` is the constrained-host capability set
+  (`clock_lock` / `ncu_crosscheck` / `powercap_throttle`). `validate()`
+  re-derives the result / coverage, rejects an unknown `not_validated` token,
+  and flags a fabricated `PASS`. Exit codes 0 / 1 / 2; with no device (and,
+  until the on-device oracle runner lands, with a device but every oracle
+  skipped) the report is `ERROR`. Exposed as `caliper.selftest()` /
+  `SELFTEST_EXIT_CODE` and `caliper._core.{selftest_from_env, selftest_assemble,
+  validate_selftest_json}`.
+- `caliper_core::oracles` gains O7: `check_o7_calibration_gemm(measured, arch)`
+  compares a locked-clock calibration-GEMM `p50` against `calibration_gemm_p50_us`
+  within +-8% (`verified` / `clocks-suspect`). It returns `None` for a SKU not
+  in the table (the caller reports `SKIP`); the table ships empty until each
+  SKU is measured at acceptance.
 - `notebooks/selftest.ipynb` (runs `caliper selftest --full`, saves and
   validates the report) and a finalized `notebooks/dev.ipynb`; `CONTRIBUTING.md`
   documents the push -> Colab -> PR loop.
