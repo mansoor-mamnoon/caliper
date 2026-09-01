@@ -106,6 +106,66 @@ def test_elementwise_roofline_spec_is_none_for_a_missing_dimension(mod: Any) -> 
     assert mod.roofline_spec({"ROWS": 256}, "bf16") is None
 
 
+# -- assemble_result: the "valid row" half of the DoD, off-device ----------
+
+
+def _fake_machine() -> dict[str, Any]:
+    return {
+        "gpu_name": "NVIDIA A100-SXM4-40GB",
+        "sm_arch": "sm_80",
+        "vram_mib": 40960,
+        "sm_count": 108,
+        "cuda_runtime": "12.4",
+        "toolkit": {"triton": "3.1.0", "torch": "2.5.0", "ptxas": "12.4", "nvcc": None},
+    }
+
+
+def test_assemble_result_builds_a_schema_valid_record() -> None:
+    samples_us = [243.1, 243.4, 242.9, 244.0, 243.2]
+    spec = gemm.roofline_spec({"M": 4096, "N": 4096, "K": 4096}, "bf16")
+    assert spec is not None
+
+    result = _common.assemble_result(
+        kernel_name="gemm",
+        kernel_impl="triton",
+        dtype="bf16",
+        layout="row",
+        shape={"M": 4096, "N": 4096, "K": 4096},
+        source_hash=gemm.SOURCE_HASH,
+        autotune_config=gemm.CONFIGS[0],
+        samples_us=samples_us,
+        machine=_fake_machine(),
+        flops=spec["flops"],
+        bytes_hbm=spec["bytes_hbm"],
+        baseline="cublas",
+        baseline_pct=0.94,
+    )
+
+    assert result.validate() == []  # the DoD's "valid row"
+    assert result.p50_us == pytest.approx(243.2)
+    assert set(result.flags) == {"clocks-unlocked", "corpus-live-timing"}
+    assert result.kernel["source_hash"] == gemm.SOURCE_HASH
+    assert result.roofline["baseline"] == "cublas"
+    pct = result.roofline_pct
+    assert pct is not None and 0.0 <= pct <= 1.5
+
+
+def test_assemble_result_omits_roofline_without_flop_counts() -> None:
+    result = _common.assemble_result(
+        kernel_name="softmax",
+        kernel_impl="triton",
+        dtype="bf16",
+        layout=None,
+        shape={"ROWS": 4096, "COLS": 4096},
+        source_hash=softmax.SOURCE_HASH,
+        autotune_config={"BLOCK_SIZE": 4096},
+        samples_us=[10.0, 11.0, 10.5],
+        machine=_fake_machine(),
+    )
+    assert result.validate() == []
+    assert result.roofline["achieved_tflops"] is None
+
+
 # -- gemm's autotune contract (tests/l6_e2e/test_autotune_cache.py needs this) --
 
 

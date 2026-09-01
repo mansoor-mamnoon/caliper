@@ -3,9 +3,9 @@
 Every corpus kernel is measured through :func:`caliper.live_timing_ms` -- the
 same CUDA-event loop ``do_bench`` uses -- not through ``bench()``'s device-layer
 ports (those drive the CUDA-C++ oracle kernels O1-O7 and their real launcher is
-still a stub). A corpus kernel therefore genuinely runs today, on any host with
-PyTorch, Triton, and a CUDA device: nothing here waits on the rest of the
-on-device work.
+still a stub). So a corpus kernel runs without waiting on the rest of the
+on-device work: it needs only PyTorch, Triton, and a CUDA device. On-device
+verification happens on Colab (``docs/plan.md`` s0.5).
 
 Because the run bypasses the Rust reduction pipeline (no clock lock, no L2
 flush accounting, no throttle detection, no steady-state trim), every record
@@ -30,8 +30,11 @@ __all__ = [
     "TritonPin",
     "assemble_result",
     "content_hash",
+    "dim",
     "has_module",
     "require_live_deps",
+    "roofline_spec_for",
+    "time_kernel",
     "torch_machine",
 ]
 
@@ -65,6 +68,24 @@ def content_hash(source_file: str | Path) -> str:
 def has_module(name: str) -> bool:
     """Whether ``name`` is importable, without actually importing it."""
     return importlib.util.find_spec(name) is not None
+
+
+def dim(shape: dict[str, Any], *names: str) -> int:
+    """The first of ``names`` present in ``shape``, as an ``int``. Lets a
+    kernel accept a dimension under either case (``"m"`` from a ``sweep`` cell,
+    ``"M"`` from a direct call)."""
+    for name in names:
+        if name in shape:
+            return int(shape[name])
+    raise KeyError(f"shape is missing one of {names}: {shape!r}")
+
+
+def roofline_spec_for(kernel_key: str, shape: dict[str, Any], dtype: str) -> dict[str, Any] | None:
+    """The FLOP / HBM-byte roofline spec for ``kernel_key`` at ``shape`` and
+    ``dtype`` (delegating to ``caliper._core``), or ``None`` if a dimension is
+    missing. Pure; no GPU needed."""
+    spec_json = _core.corpus_roofline_spec(kernel_key, json.dumps(shape), dtype)
+    return dict(json.loads(spec_json)) if spec_json is not None else None
 
 
 def require_live_deps(kernel_name: str) -> None:
@@ -116,17 +137,18 @@ def assemble_result(
     source_hash: str,
     autotune_config: dict[str, Any],
     samples_us: list[float],
+    machine: dict[str, Any],
     flops: float | None = None,
     bytes_hbm: float | None = None,
     baseline: str | None = None,
     baseline_pct: float | None = None,
 ) -> Result:
     """Build a :class:`~caliper.Result` from raw per-launch timing samples
-    (microseconds), the kernel identity, and (optionally) the FLOP / HBM-byte
-    counts needed for a roofline.
+    (microseconds), the kernel identity, the ``machine`` fingerprint (see
+    :func:`torch_machine`), and (optionally) the FLOP / HBM-byte counts needed
+    for a roofline. Pure -- no GPU -- so an off-device test can drive it.
     """
     summary = _core.summarize(samples_us)  # {n, min, p10, p50, p90, max, mean, mad, [cov]}
-    machine = torch_machine()
 
     record: dict[str, Any] = Result.default().to_dict()
     record["measured_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -168,7 +190,8 @@ def assemble_result(
         pct = analysis["roofline_pct"]
         record["roofline"] = {
             "achieved_tflops": analysis["achieved_tflops"],
-            "roofline_pct": min(pct, 1.5) if isinstance(pct, (int, float)) else None,
+            # match the Rust reduce pipeline's clamp (roofline.rs: 0.0 ..= 1.5).
+            "roofline_pct": (max(0.0, min(pct, 1.5)) if isinstance(pct, (int, float)) else None),
             "achieved_gbps": analysis["achieved_gbps"],
             "arithmetic_intensity": analysis["arithmetic_intensity"],
             "ridge_point": analysis["ridge_point"],

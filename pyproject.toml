@@ -100,10 +100,6 @@ ignore_missing_imports = true
 module = "triton.*"
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = "caliper.corpus.*"
-ignore_missing_imports = true
-
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]

@@ -11,12 +11,18 @@ device.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from caliper import Result
-from caliper._core import corpus_roofline_spec
-from caliper.corpus._common import assemble_result, content_hash, require_live_deps, time_kernel
+from caliper.corpus._common import (
+    assemble_result,
+    content_hash,
+    dim,
+    require_live_deps,
+    roofline_spec_for,
+    time_kernel,
+    torch_machine,
+)
 
 try:
     import triton
@@ -121,15 +127,7 @@ else:  # pragma: no cover - triton not installed on the dev box
 def roofline_spec(shape: dict[str, Any], dtype: str) -> dict[str, Any] | None:
     """The FLOP / HBM-byte roofline spec for ``shape={"M","N","K"}`` at
     ``dtype``, or ``None`` if a dimension is missing. Pure; no GPU needed."""
-    spec_json = corpus_roofline_spec(KERNEL_KEY, json.dumps(shape), dtype)
-    return dict(json.loads(spec_json)) if spec_json is not None else None
-
-
-def _dim(shape: dict[str, Any], *names: str) -> int:
-    for name in names:
-        if name in shape:
-            return int(shape[name])
-    raise KeyError(f"shape is missing one of {names}: {shape!r}")
+    return roofline_spec_for(KERNEL_KEY, shape, dtype)
 
 
 def run(cell: dict[str, Any], config: dict[str, int] | None = None) -> Result:
@@ -140,7 +138,7 @@ def run(cell: dict[str, Any], config: dict[str, int] | None = None) -> Result:
     import torch
 
     shape = cell["shape"]
-    m, n, k = _dim(shape, "m", "M"), _dim(shape, "n", "N"), _dim(shape, "k", "K")
+    m, n, k = dim(shape, "m", "M"), dim(shape, "n", "N"), dim(shape, "k", "K")
     dtype_name = cell.get("dtype", "bf16")
     layout = cell.get("layout", "row")
     torch_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[dtype_name]
@@ -197,6 +195,7 @@ def run(cell: dict[str, Any], config: dict[str, int] | None = None) -> Result:
         source_hash=SOURCE_HASH,
         autotune_config=cfg,
         samples_us=samples_us,
+        machine=torch_machine(),
         flops=spec["flops"] if spec else None,
         bytes_hbm=spec["bytes_hbm"] if spec else None,
         baseline="cublas",
