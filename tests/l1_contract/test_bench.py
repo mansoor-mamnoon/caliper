@@ -81,6 +81,21 @@ def test_corpus_target_sets_the_kernel_key() -> None:
     assert r.kernel["name"] == "oracle:busy"
 
 
+def test_corpus_gemm_reports_a_roofline() -> None:
+    r = bench(
+        "corpus:gemm",
+        recording=_rec("gemm.jsonl"),
+        shape={"M": 4096, "N": 4096, "K": 4096},
+        dtype="bf16",
+        batches=40,
+    )
+    assert r.kernel["name"] == "corpus:gemm_bf16"
+    assert r.achieved_tflops is not None and r.achieved_tflops > 0.0
+    assert r.roofline["bound"] == "compute"
+    assert 0.5 < r.roofline["roofline_pct"] < 1.0
+    assert r.validate() == []
+
+
 def test_unknown_corpus_target_is_rejected() -> None:
     with pytest.raises(ValueError, match="unknown corpus target"):
         bench("corpus:o9", recording=_rec("oracle_o1.jsonl"), batches=40)

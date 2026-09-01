@@ -131,6 +131,9 @@ fn dtype_key(dtype: &str) -> &'static str {
     }
 }
 
+// PEAKS-TABLE-START (every `=> <number>,` arm below carries a `source:` comment;
+// enforced by `every_arch_has_a_cited_hbm_and_fp32_peak`)
+
 /// Peak FP32 FMA throughput (TFLOP/s), dense, at boost clock.
 #[must_use]
 pub fn peak_fp32_fma_tflops(arch: &str) -> Option<f64> {
@@ -199,6 +202,8 @@ pub fn peak_hbm_gbps(arch: &str) -> Option<f64> {
     };
     Some(v)
 }
+
+// PEAKS-TABLE-END
 
 /// The compute ceiling for a dtype: the tensor-core peak where there is one,
 /// otherwise the FP32 FMA peak (for `"fp32"`).
@@ -320,6 +325,81 @@ pub fn roofline_section(r: &RooflineResult) -> crate::schema::Roofline {
     }
 }
 
+// --- corpus RooflineSpec inference ----------------------------------------
+
+/// Bytes per element for a dtype token; defaults to 4 (fp32) when unknown.
+fn dtype_bytes(dtype: &str) -> f64 {
+    match dtype_key(dtype) {
+        "fp16" | "bf16" => 2.0,
+        "fp8" => 1.0,
+        _ => 4.0, // fp32, tf32
+    }
+}
+
+fn shape_num(shape: &crate::schema::JsonMap, key: &str) -> Option<f64> {
+    shape.get(key).and_then(serde_json::Value::as_f64)
+}
+
+/// The FLOP and HBM-byte counts for a built-in corpus kernel at a given shape,
+/// so `bench(corpus:*)` can fill in the roofline section without a hand-written
+/// spec.
+///
+/// Recognises `corpus:gemm*` (needs `M` / `N` / `K` in `shape`), `oracle:triad`
+/// (needs `n`), and `oracle:fma_peak` (needs `threads` / `iters` / `ilp`).
+/// Returns `None` for a kernel with no meaningful roofline (a pure spin) or a
+/// shape that is missing a dimension.
+#[must_use]
+pub fn corpus_spec(
+    kernel_key: &str,
+    shape: &crate::schema::JsonMap,
+    dtype: Option<&str>,
+) -> Option<RooflineSpec> {
+    let key = kernel_key.to_ascii_lowercase();
+
+    if key.contains("gemm") {
+        let (m, n, k) = (
+            shape_num(shape, "M")?,
+            shape_num(shape, "N")?,
+            shape_num(shape, "K")?,
+        );
+        let dt = dtype.unwrap_or("bf16");
+        let elem = dtype_bytes(dt);
+        return Some(RooflineSpec {
+            dtype: dt.to_string(),
+            flops: 2.0 * m * n * k,
+            bytes_hbm: (m * k + k * n + m * n) * elem,
+        });
+    }
+
+    if key.ends_with("triad") {
+        let n = shape_num(shape, "n")?;
+        let dt = dtype.unwrap_or("fp32");
+        return Some(RooflineSpec {
+            dtype: dt.to_string(),
+            flops: 2.0 * n,                       // one add + one multiply per element
+            bytes_hbm: 3.0 * n * dtype_bytes(dt), // read b, read c, write a
+        });
+    }
+
+    if key.ends_with("fma_peak") {
+        let (threads, iters, ilp) = (
+            shape_num(shape, "threads")?,
+            shape_num(shape, "iters")?,
+            shape_num(shape, "ilp")?,
+        );
+        let dt = dtype.unwrap_or("fp32");
+        return Some(RooflineSpec {
+            dtype: dt.to_string(),
+            flops: 2.0 * threads * iters * ilp,
+            // register-resident: essentially no HBM traffic. A single nominal
+            // write keeps arithmetic intensity finite and far past any ridge.
+            bytes_hbm: threads * 4.0,
+        });
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,12 +426,17 @@ mod tests {
             assert!(peak_fp32_fma_tflops(arch).is_some(), "{arch} FP32");
         }
         // FR-9: "every peaks-table cell has a cited source in code." Check it
-        // per cell -- every `=> <number>,` match arm in this module must carry a
-        // `source:` comment on the same line.
+        // per cell -- inside the PEAKS-TABLE-START/END region, every
+        // `=> <number>,` match arm must carry a `source:` comment on that line.
         let src = include_str!("roofline.rs");
+        let table = src
+            .split_once("PEAKS-TABLE-START")
+            .and_then(|(_, rest)| rest.split_once("PEAKS-TABLE-END"))
+            .map(|(body, _)| body)
+            .expect("peaks-table sentinels present");
         let mut cells = 0;
         let mut uncited = Vec::new();
-        for line in src.lines() {
+        for line in table.lines() {
             let Some((_, rhs)) = line.trim().split_once("=> ") else {
                 continue;
             };
@@ -468,5 +553,57 @@ mod tests {
         assert!(s.arithmetic_intensity.is_some());
         assert!(s.ridge_point.is_some());
         assert_eq!(s.bound.as_deref(), Some("compute"));
+    }
+
+    fn shape(pairs: &[(&str, f64)]) -> crate::schema::JsonMap {
+        pairs
+            .iter()
+            .map(|&(k, v)| (k.to_string(), serde_json::json!(v)))
+            .collect()
+    }
+
+    #[test]
+    fn corpus_spec_for_gemm_counts_flops_and_bytes() {
+        let s = corpus_spec(
+            "corpus:gemm_bf16",
+            &shape(&[("M", 4096.0), ("N", 4096.0), ("K", 4096.0)]),
+            Some("bf16"),
+        )
+        .unwrap();
+        approx(s.flops, 2.0 * 4096.0 * 4096.0 * 4096.0);
+        approx(s.bytes_hbm, 3.0 * 4096.0 * 4096.0 * 2.0); // 3 square bf16 tiles
+        assert_eq!(s.dtype, "bf16");
+        // and it lands compute-bound on an A100.
+        let r = analyze("sm_80", &s, 0.5e-3);
+        assert_eq!(r.bound, Bound::Compute);
+    }
+
+    #[test]
+    fn corpus_spec_for_triad_is_memory_bound() {
+        let s = corpus_spec("oracle:triad", &shape(&[("n", 1.0e8)]), None).unwrap();
+        approx(s.flops, 2.0e8);
+        approx(s.bytes_hbm, 3.0 * 1.0e8 * 4.0);
+        assert_eq!(s.dtype, "fp32");
+        let r = analyze("sm_80", &s, 0.6e-3);
+        assert_eq!(r.bound, Bound::Memory);
+    }
+
+    #[test]
+    fn corpus_spec_for_fma_peak_is_compute_bound() {
+        let s = corpus_spec(
+            "oracle:fma_peak",
+            &shape(&[("threads", 4.0e6), ("iters", 1.0e5), ("ilp", 4.0)]),
+            None,
+        )
+        .unwrap();
+        approx(s.flops, 2.0 * 4.0e6 * 1.0e5 * 4.0);
+        // arithmetic intensity is far past any ridge point (max ~300 FLOP/byte)
+        assert!(s.flops / s.bytes_hbm > 1.0e4);
+    }
+
+    #[test]
+    fn corpus_spec_is_none_for_a_spin_or_a_missing_dimension() {
+        assert!(corpus_spec("oracle:busy", &shape(&[]), None).is_none());
+        assert!(corpus_spec("corpus:gemm_bf16", &shape(&[("M", 4096.0)]), None).is_none());
     }
 }

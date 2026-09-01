@@ -140,6 +140,21 @@ class Result:
         return None if value is None else float(value)
 
     @property
+    def mean_us(self) -> float | None:
+        value = self._data["timing"]["mean_us"]
+        return None if value is None else float(value)
+
+    @property
+    def min_us(self) -> float | None:
+        value = self._data["timing"]["min_us"]
+        return None if value is None else float(value)
+
+    @property
+    def max_us(self) -> float | None:
+        value = self._data["timing"]["max_us"]
+        return None if value is None else float(value)
+
+    @property
     def mad_us(self) -> float | None:
         value = self._data["timing"]["mad_us"]
         return None if value is None else float(value)

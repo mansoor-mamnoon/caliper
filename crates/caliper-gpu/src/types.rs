@@ -45,6 +45,14 @@ pub struct RawSamples {
     /// Dynamic shared memory per block requested at launch (bytes).
     #[serde(default)]
     pub dynamic_smem_bytes: Option<u32>,
+    /// GPU-event time of a single un-batched launch, when the launcher timed
+    /// one to resolve `cuda_graph="auto"` (microseconds).
+    #[serde(default)]
+    pub single_launch_us: Option<f64>,
+    /// Whether the launcher actually captured the batch into a CUDA graph.
+    /// `None` when the launcher did not report it.
+    #[serde(default)]
+    pub graph_used: Option<bool>,
 }
 
 /// Whether to capture each timed batch into a CUDA graph and replay it, which
@@ -60,6 +68,18 @@ pub enum GraphMode {
     On,
     /// Never capture a graph.
     Off,
+}
+
+impl GraphMode {
+    /// The lowercase token (`"auto"` / `"on"` / `"off"`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
 }
 
 /// A clock-lock request. `None` means "leave this clock alone / use the max".

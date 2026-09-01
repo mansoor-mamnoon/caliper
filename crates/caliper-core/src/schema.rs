@@ -67,6 +67,13 @@ pub struct Timing {
     pub p50_us: Option<f64>,
     /// 90th-percentile GPU-event time (microseconds).
     pub p90_us: Option<f64>,
+    /// Arithmetic mean of the per-launch GPU-event times (microseconds). This
+    /// is what a Triton-style `do_bench(return_mode="mean")` reports.
+    pub mean_us: Option<f64>,
+    /// Fastest per-launch GPU-event time (microseconds).
+    pub min_us: Option<f64>,
+    /// Slowest per-launch GPU-event time (microseconds).
+    pub max_us: Option<f64>,
     /// Median absolute deviation of the samples (microseconds).
     pub mad_us: Option<f64>,
     /// Median wall-clock time including host-side overhead (microseconds).
@@ -314,6 +321,9 @@ pub fn validate(record: &Record) -> Vec<String> {
     check_finite_nonneg("timing.p10_us", record.timing.p10_us, &mut problems);
     check_finite_nonneg("timing.p50_us", record.timing.p50_us, &mut problems);
     check_finite_nonneg("timing.p90_us", record.timing.p90_us, &mut problems);
+    check_finite_nonneg("timing.mean_us", record.timing.mean_us, &mut problems);
+    check_finite_nonneg("timing.min_us", record.timing.min_us, &mut problems);
+    check_finite_nonneg("timing.max_us", record.timing.max_us, &mut problems);
     check_finite_nonneg("timing.mad_us", record.timing.mad_us, &mut problems);
     check_finite_nonneg(
         "timing.wall_p50_us",

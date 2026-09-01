@@ -138,6 +138,34 @@ fn a_hard_lock_error_degrades_to_an_unlocked_run() {
 }
 
 #[test]
+fn auto_graph_run_is_tagged_and_a_roofline_spec_is_recorded() {
+    use caliper_core::RooflineSpec;
+
+    let opts = BenchOpts {
+        batches: 40,
+        roofline: Some(RooflineSpec {
+            dtype: "bf16".to_string(),
+            flops: 2.0 * 4096.0 * 4096.0 * 4096.0,
+            bytes_hbm: 3.0 * 4096.0 * 4096.0 * 2.0,
+        }),
+        ..BenchOpts::default()
+    };
+    let rec = run_replay(&fixture("graph_auto.jsonl"), &opts).unwrap();
+
+    // launcher reported graph_used = true
+    assert!(
+        rec.flags.contains(&"graph-captured".to_string()),
+        "{:?}",
+        rec.flags
+    );
+    // sm_89 has no bf16 tensor peak? it does (165.2). roofline section is filled.
+    assert!(rec.roofline.achieved_tflops.unwrap() > 0.0);
+    assert!(rec.roofline.bound.is_some());
+    assert!(rec.timing.mean_us.unwrap() > 0.0);
+    assert!(rec.timing.min_us.unwrap() <= rec.timing.max_us.unwrap());
+}
+
+#[test]
 fn a_fixed_warmup_trims_exactly_n_batches() {
     let rec = run_replay(
         &fixture("happy.jsonl"),

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from caliper import _core
 from caliper._record import Result
-from caliper.api import bench
+from caliper.api import bench, do_bench
 
 __version__: str = _core.__version__
 
@@ -20,4 +20,4 @@ def schema_version() -> str:
     return _core.schema_version()
 
 
-__all__ = ["Result", "__version__", "bench", "schema_version"]
+__all__ = ["Result", "__version__", "bench", "do_bench", "schema_version"]

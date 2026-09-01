@@ -68,18 +68,25 @@ def time_batches(
     throttled: list[bool],
     reasons: list[str],
     kernel_key: str = "kernel",
+    single_launch_us: float | None = None,
+    graph_used: bool | None = None,
 ) -> str:
+    ret: dict[str, object] = {
+        "gpu_us": gpu,
+        "wall_us": wall,
+        "batch": 32,
+        "throttled": throttled,
+        "throttle_reasons": reasons,
+    }
+    if single_launch_us is not None:
+        ret["single_launch_us"] = single_launch_us
+    if graph_used is not None:
+        ret["graph_used"] = graph_used
     return ok(
         "kernel_launcher",
         "time_batches",
         {"kernel_key": kernel_key, "batch": 32, "batches": n, "use_graph": False},
-        {
-            "gpu_us": gpu,
-            "wall_us": wall,
-            "batch": 32,
-            "throttled": throttled,
-            "throttle_reasons": reasons,
-        },
+        ret,
     )
 
 
@@ -329,6 +336,50 @@ def probe_hard_error_fixture() -> None:
     )
 
 
+def gemm() -> None:
+    # A dense bf16 GEMM run keyed for `caliper bench corpus:gemm`. ~38 ms/batch
+    # -> ~1.19 ms/launch; with a 4096^3 bf16 spec on the RTX 4090 fixture that
+    # lands ~70% of the tensor-core peak and classifies compute-bound.
+    n = 40
+    gpu = [round(38050.0 + 30.0 * math.sin(i / 2.0), 3) for i in range(n)]
+    wall = [round(g + 320.0, 3) for g in gpu]
+    write(
+        "gemm.jsonl",
+        [
+            snapshot(),
+            ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
+            time_batches(n, gpu, wall, [], [], kernel_key="corpus:gemm_bf16"),
+            ok("gpu_clock", "throttle_reasons", None, []),
+            probe("corpus:gemm_bf16"),
+            read(2520, True),
+            ok("gpu_clock", "unlock", None, None),
+        ],
+    )
+
+
+def graph_auto() -> None:
+    # A short kernel (~6 us/launch) under cuda_graph="auto": the launcher's
+    # single-launch probe (5.9 us) is below the capture threshold, so the run
+    # should be tagged `graph-captured`.
+    n = 40
+    gpu = [round(190.0 + 0.5 * math.sin(i), 3) for i in range(n)]
+    wall = [round(g + 40.0, 3) for g in gpu]
+    write(
+        "graph_auto.jsonl",
+        [
+            snapshot(),
+            ok("gpu_clock", "lock", LOCK_ARGS, "Locked"),
+            poll([]),
+            time_batches(n, gpu, wall, [], [], single_launch_us=5.9, graph_used=True),
+            ok("gpu_clock", "throttle_reasons", None, []),
+            probe("kernel"),
+            read(2520, True),
+            ok("gpu_clock", "unlock", None, None),
+        ],
+    )
+
+
 if __name__ == "__main__":
     for f in (
         happy,
@@ -340,6 +391,8 @@ if __name__ == "__main__":
         ptxas_unavailable,
         multi_kernel_probe,
         probe_hard_error_fixture,
+        graph_auto,
+        gemm,
     ):
         f()
-    print("wrote 9 bench fixtures")
+    print("wrote 11 bench fixtures")

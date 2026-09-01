@@ -106,6 +106,23 @@ fn bench_replay(recording: &str, opts_json: &str) -> PyResult<String> {
     Ok(schema::to_json(&record))
 }
 
+/// Run `bench()` against a recorded session and return the per-launch
+/// GPU-event-time quantiles (each `q` in `0.0..=1.0`), in microseconds -- the
+/// raw material for `caliper.do_bench(quantiles=...)`. Raises ``ValueError`` on
+/// bad options / recording / quantile.
+#[pyfunction]
+fn bench_replay_quantiles(
+    recording: &str,
+    opts_json: &str,
+    quantiles: Vec<f64>,
+) -> PyResult<Vec<f64>> {
+    let opts: BenchOpts = serde_json::from_str(opts_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid bench options: {e}")))?;
+    let (_record, qs) = caliper_gpu::run_replay_quantiles(recording, &opts, &quantiles)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(qs)
+}
+
 // --- ptxas parsing ------------------------------------------------------
 
 /// Parse a `ptxas -v` / `cuobjdump -res-usage` / HIP `-v` report, sniffing the
@@ -176,6 +193,25 @@ fn peak_compute_tflops(arch: &str, dtype: &str) -> Option<f64> {
 #[pyfunction]
 fn peak_hbm_gbps(arch: &str) -> Option<f64> {
     caliper_core::roofline::peak_hbm_gbps(arch)
+}
+
+/// The inferred `RooflineSpec` (as JSON) for a built-in corpus kernel at
+/// `shape_json` (a JSON object of dimensions) and `dtype`, or `None` if the
+/// kernel has no roofline or a dimension is missing. Raises ``ValueError`` if
+/// `shape_json` is not a JSON object.
+#[pyfunction]
+#[pyo3(signature = (kernel_key, shape_json, dtype=None))]
+fn corpus_roofline_spec(
+    kernel_key: &str,
+    shape_json: &str,
+    dtype: Option<&str>,
+) -> PyResult<Option<String>> {
+    let shape: caliper_core::schema::JsonMap = serde_json::from_str(shape_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid shape: {e}")))?;
+    Ok(
+        caliper_core::roofline::corpus_spec(kernel_key, &shape, dtype)
+            .map(|s| serde_json::to_string(&s).expect("RooflineSpec serialises")),
+    )
 }
 
 // --- corpus targets ------------------------------------------------------
@@ -305,11 +341,13 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(cross_pass_cov, module)?)?;
     module.add_function(wrap_pyfunction!(steady_state_index, module)?)?;
     module.add_function(wrap_pyfunction!(bench_replay, module)?)?;
+    module.add_function(wrap_pyfunction!(bench_replay_quantiles, module)?)?;
     module.add_function(wrap_pyfunction!(parse_ptxas, module)?)?;
     module.add_function(wrap_pyfunction!(theoretical_occupancy, module)?)?;
     module.add_function(wrap_pyfunction!(roofline_analyze, module)?)?;
     module.add_function(wrap_pyfunction!(peak_compute_tflops, module)?)?;
     module.add_function(wrap_pyfunction!(peak_hbm_gbps, module)?)?;
+    module.add_function(wrap_pyfunction!(corpus_roofline_spec, module)?)?;
     module.add_function(wrap_pyfunction!(resolve_corpus_target, module)?)?;
     module.add_function(wrap_pyfunction!(corpus_targets, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_replay, module)?)?;

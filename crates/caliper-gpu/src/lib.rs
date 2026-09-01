@@ -26,7 +26,7 @@ pub mod types;
 #[cfg(feature = "cuda")]
 pub mod real;
 
-pub use bench::{run, run_replay, BenchOpts, DeviceLayer};
+pub use bench::{run, run_quantiles, run_replay, run_replay_quantiles, BenchOpts, DeviceLayer};
 pub use error::{GpuError, Result};
 pub use ports::{DeviceInfo, GpuClock, KernelLauncher, ModuleProbe};
 pub use select::{open_from_env, DeviceLayerHandle, PortSelection};

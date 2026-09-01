@@ -178,7 +178,19 @@ impl std::error::Error for PipelineError {}
 ///
 /// # Errors
 /// See [`PipelineError`].
-pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
+/// The per-launch GPU and wall times, after throttle invalidation and
+/// steady-state trimming -- the vectors [`reduce`] summarises.
+struct PerLaunch {
+    gpu_us: Vec<f64>,
+    wall_us: Vec<f64>,
+    n_invalidated: usize,
+    warm_start: usize,
+    warm_converged: bool,
+}
+
+/// Invalidate throttled batches, trim to steady state, and convert per-batch to
+/// per-launch. Shared by [`reduce`] and [`reduce_quantiles`].
+fn prepare_per_launch(input: &ReduceInput) -> Result<PerLaunch, PipelineError> {
     if input.batch == 0 {
         return Err(PipelineError::InvalidBatch);
     }
@@ -207,11 +219,42 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
     }
 
     let b = f64::from(input.batch);
-    let per_launch_gpu: Vec<f64> = warm_gpu.iter().map(|x| x / b).collect();
-    let per_launch_wall: Vec<f64> = warm_wall.iter().map(|x| x / b).collect();
+    Ok(PerLaunch {
+        gpu_us: warm_gpu.iter().map(|x| x / b).collect(),
+        wall_us: warm_wall.iter().map(|x| x / b).collect(),
+        n_invalidated: kept.n_invalidated,
+        warm_start: warm.start,
+        warm_converged: warm.converged,
+    })
+}
 
-    let g: Summary = summarize(&per_launch_gpu).ok_or(PipelineError::NonFinite)?;
-    let w: Summary = summarize(&per_launch_wall).ok_or(PipelineError::NonFinite)?;
+/// The requested quantiles (each `q` in `0.0..=1.0`) of the per-launch
+/// GPU-event times, in microseconds -- the raw material for a Triton-style
+/// `do_bench(quantiles=...)`.
+///
+/// # Errors
+/// [`PipelineError`] if the samples are unusable, or [`PipelineError::NonFinite`]
+/// if any `q` is outside `0.0..=1.0`.
+pub fn reduce_quantiles(input: &ReduceInput, quantiles: &[f64]) -> Result<Vec<f64>, PipelineError> {
+    if quantiles.iter().any(|q| !(0.0..=1.0).contains(q)) {
+        return Err(PipelineError::NonFinite);
+    }
+    let per = prepare_per_launch(input)?;
+    let mut sorted = per.gpu_us;
+    sorted.sort_by(f64::total_cmp);
+    Ok(quantiles
+        .iter()
+        .map(|&q| crate::stats::quantile_sorted(&sorted, q))
+        .collect())
+}
+
+pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
+    let per = prepare_per_launch(&input)?;
+    let per_launch_gpu = &per.gpu_us;
+    let per_launch_wall = &per.wall_us;
+
+    let g: Summary = summarize(per_launch_gpu).ok_or(PipelineError::NonFinite)?;
+    let w: Summary = summarize(per_launch_wall).ok_or(PipelineError::NonFinite)?;
 
     let mut record = Record {
         clocks: input.clocks,
@@ -227,12 +270,15 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
     record.timing.p10_us = Some(g.p10);
     record.timing.p50_us = Some(g.p50);
     record.timing.p90_us = Some(g.p90);
+    record.timing.mean_us = Some(g.mean);
+    record.timing.min_us = Some(g.min);
+    record.timing.max_us = Some(g.max);
     record.timing.mad_us = Some(g.mad);
     record.timing.wall_p50_us = Some(w.p50);
     record.timing.launch_overhead_us = Some((w.p50 - g.p50).max(0.0));
-    record.timing.n_samples = Some(warm_gpu.len() as u64);
-    record.timing.n_warmup_to_steady = Some(warm.start as u64);
-    record.timing.invalidated_samples = Some(kept.n_invalidated as u64);
+    record.timing.n_samples = Some(per.gpu_us.len() as u64);
+    record.timing.n_warmup_to_steady = Some(per.warm_start as u64);
+    record.timing.invalidated_samples = Some(per.n_invalidated as u64);
 
     let mut reasons = input.throttle_reasons.clone();
     reasons.sort();
@@ -242,13 +288,13 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
     if !input.clocks_locked {
         record.flags.push("clocks-unlocked".to_string());
     }
-    if kept.n_invalidated > 0 {
+    if per.n_invalidated > 0 {
         record.flags.push("throttled-samples-dropped".to_string());
     }
     if !input.flush_l2 {
         record.flags.push("l2-flush-disabled".to_string());
     }
-    if !warm.converged {
+    if !per.warm_converged {
         record.flags.push("warmup-not-converged".to_string());
     }
 
@@ -359,6 +405,44 @@ mod tests {
         assert!(flush_buffer_bytes(0) >= FLUSH_GRANULARITY);
         // a Hopper-class 50 MiB L2 gets ~50, not 256
         assert!(flush_buffer_bytes(50 * MIB) < 60 * MIB);
+    }
+
+    #[test]
+    fn reduce_reports_mean_min_max_per_launch() {
+        // 40 batches of 32 launches; batch times 6400 + (i%5)*32 -> per-launch
+        // 200.0 .. 204.0 in steps of 1.0.
+        let gpu: Vec<f64> = (0..40).map(|i| 6400.0 + (i % 5) as f64 * 32.0).collect();
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+        let rec = reduce(base_input(gpu, wall)).unwrap();
+        let t = &rec.timing;
+        assert_eq!(t.min_us, Some(200.0));
+        assert_eq!(t.max_us, Some(204.0));
+        assert_eq!(t.mean_us, Some(202.0));
+        assert!(t.min_us.unwrap() <= t.p50_us.unwrap());
+        assert!(t.p50_us.unwrap() <= t.max_us.unwrap());
+        assert!(crate::schema::validate(&rec).is_empty());
+    }
+
+    #[test]
+    fn reduce_quantiles_returns_per_launch_percentiles_in_us() {
+        let gpu: Vec<f64> = (0..40).map(|i| 6400.0 + (i % 5) as f64 * 32.0).collect();
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+        let input = base_input(gpu, wall);
+
+        let qs = reduce_quantiles(&input, &[0.5, 0.0, 1.0]).unwrap();
+        let rec = reduce(input.clone()).unwrap();
+        assert!((qs[0] - rec.timing.p50_us.unwrap()).abs() < 1e-9);
+        assert_eq!(qs[1], 200.0); // min
+        assert_eq!(qs[2], 204.0); // max
+
+        assert_eq!(
+            reduce_quantiles(&input, &[1.5]),
+            Err(PipelineError::NonFinite)
+        );
+        assert_eq!(
+            reduce_quantiles(&base_input(vec![], vec![]), &[0.5]),
+            Err(PipelineError::NoSamples)
+        );
     }
 
     #[test]

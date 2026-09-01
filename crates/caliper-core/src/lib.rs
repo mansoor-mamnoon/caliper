@@ -10,6 +10,7 @@
 
 pub mod doctor;
 pub mod fingerprint;
+pub mod graph;
 pub mod occupancy;
 pub mod oracles;
 pub mod pipeline;
@@ -24,13 +25,16 @@ pub use fingerprint::{
     assert_complete as assert_fingerprint_complete, check as check_fingerprint, FingerprintCheck,
     FingerprintError,
 };
+pub use graph::{resolve as resolve_graph_mode, GraphChoice};
 pub use occupancy::{theoretical_occupancy, Limiter, OccupancyEstimate};
 pub use oracles::{fit_line, LineFit, OracleCheck};
-pub use pipeline::{flush_buffer_bytes, invalidate, reduce, PipelineError, ReduceInput};
+pub use pipeline::{
+    flush_buffer_bytes, invalidate, reduce, reduce_quantiles, PipelineError, ReduceInput,
+};
 pub use ptxas_parse::{parse_any as parse_ptxas, ParsedKernel, PtxasParseError};
 pub use roofline::{
-    analyze as roofline_analyze, peak_compute_tflops, peak_fp32_fma_tflops, peak_hbm_gbps,
-    peak_tensor_tflops, Bound, RooflineResult, RooflineSpec,
+    analyze as roofline_analyze, corpus_spec as corpus_roofline_spec, peak_compute_tflops,
+    peak_fp32_fma_tflops, peak_hbm_gbps, peak_tensor_tflops, Bound, RooflineResult, RooflineSpec,
 };
 pub use schema::{Record, SCHEMA_VERSION};
 pub use stats::{cross_pass_cov, summarize, Summary};

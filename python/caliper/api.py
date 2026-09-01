@@ -46,6 +46,7 @@ def bench(
     kernel_key: str = "kernel",
     kernel_impl: str | None = None,
     dtype: str | None = None,
+    shape: dict[str, int] | None = None,
     batch: int = 32,
     batches: int = 50,
     cuda_graph: str | bool = "auto",
@@ -85,12 +86,16 @@ def bench(
         assert fixture is not None
         recording = Path(fixture).read_text()
 
+    roofline_spec: dict[str, Any] | None = None
     if isinstance(target, str) and target.startswith("corpus:"):
         resolved = _core.resolve_corpus_target(target)
         if resolved is None:
             names = ", ".join(t[0] for t in _core.corpus_targets())
             raise ValueError(f"unknown corpus target {target!r}; available: {names}")
         kernel_key = resolved
+        spec_json = _core.corpus_roofline_spec(kernel_key, json.dumps(shape or {}), dtype)
+        if spec_json is not None:
+            roofline_spec = json.loads(spec_json)
 
     opts = {
         "kernel_key": kernel_key,
@@ -103,6 +108,7 @@ def bench(
         "lock_clocks": lock_clocks,
         "clock_target": {"sm_mhz": sm_mhz, "mem_mhz": mem_mhz},
         "warmup": _warmup_plan(warmup, warmup_window, warmup_tol, warmup_min),
+        "roofline": roofline_spec,
     }
     return Result.from_json(_core.bench_replay(recording, json.dumps(opts)))
 
@@ -113,6 +119,73 @@ def _read(fixture: str | Path | None, recording: str | None) -> str | None:
     if fixture is not None:
         return Path(fixture).read_text()
     return None
+
+
+_RETURN_MODES = ("min", "max", "mean", "median")
+
+
+def do_bench(
+    fn: Any = None,
+    warmup: float = 25,
+    rep: float = 100,
+    grad_to_none: Any = None,
+    quantiles: list[float] | None = None,
+    fast_flush: bool = True,
+    return_mode: str = "mean",
+    *,
+    fixture: str | Path | None = None,
+    recording: str | None = None,
+    kernel_key: str = "kernel",
+    dtype: str | None = None,
+    batch: int = 32,
+    batches: int = 50,
+) -> float | list[float]:
+    """Triton-compatible ``do_bench``: time ``fn`` and return the result in
+    **milliseconds**.
+
+    The signature matches ``triton.testing.do_bench`` so an unmodified Triton
+    script can swap the import. ``return_mode`` is one of ``"min"`` / ``"max"``
+    / ``"mean"`` / ``"median"``; ``quantiles`` (e.g. ``[0.5, 0.2, 0.8]``)
+    overrides it and returns a list.
+
+    ``warmup`` / ``rep`` (Triton's millisecond budgets), ``grad_to_none``, and
+    ``fast_flush`` are accepted for compatibility. On the recorded-session path
+    the sample count is already fixed, so ``warmup`` / ``rep`` are inert and the
+    grad / flush handling is the on-device launcher's job.
+
+    Timing a live ``fn`` needs the on-device launcher (a CUDA host); until then
+    pass ``fixture=`` / ``recording=`` a device recording.
+    """
+    if return_mode not in _RETURN_MODES:
+        raise ValueError(f"return_mode must be one of {_RETURN_MODES}, got {return_mode!r}")
+    del fn, warmup, rep, grad_to_none, fast_flush  # accepted for Triton parity; see docstring
+
+    text = _read(fixture, recording)
+    if text is None:
+        raise NotImplementedError(
+            "caliper.do_bench() currently runs from a recorded device session; pass "
+            "fixture=<path> or recording=<text>. Timing a live callable needs the "
+            "on-device launcher, which runs on a CUDA host."
+        )
+
+    opts = json.dumps(
+        {"kernel_key": kernel_key, "dtype": dtype, "batch": batch, "batches": batches}
+    )
+
+    if quantiles is not None:
+        us = _core.bench_replay_quantiles(text, opts, [float(q) for q in quantiles])
+        return [v / 1000.0 for v in us]
+
+    r = Result.from_json(_core.bench_replay(text, opts))
+    picked = {
+        "mean": r.mean_us,
+        "median": r.p50_us,
+        "min": r.min_us,
+        "max": r.max_us,
+    }[return_mode]
+    if picked is None:  # pragma: no cover - reduce always fills these
+        raise ValueError(f"the record has no {return_mode} timing")
+    return picked / 1000.0
 
 
 def doctor(

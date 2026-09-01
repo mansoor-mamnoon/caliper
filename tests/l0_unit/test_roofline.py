@@ -73,6 +73,33 @@ def test_unknown_arch_or_dtype_is_unknown_but_keeps_achieved() -> None:
     assert _analyze("sm_70", "fp8", 1e12, 1e9, 1e-3)["bound"] == "unknown"
 
 
+def _corpus_spec(kernel: str, shape: dict[str, int], dtype: str | None) -> dict[str, Any]:
+    raw = _core.corpus_roofline_spec(kernel, json.dumps(shape), dtype)
+    assert raw is not None
+    result: dict[str, Any] = json.loads(raw)
+    return result
+
+
+def test_corpus_roofline_spec_infers_flop_and_byte_counts() -> None:
+    gemm = _corpus_spec("corpus:gemm_bf16", {"M": 4096, "N": 4096, "K": 4096}, "bf16")
+    assert gemm["dtype"] == "bf16"
+    assert gemm["flops"] == 2.0 * 4096**3
+    assert gemm["bytes_hbm"] == 3.0 * 4096**2 * 2.0
+
+    triad = _corpus_spec("oracle:triad", {"n": 1_000_000}, None)
+    assert triad["dtype"] == "fp32"
+    assert triad["flops"] == 2_000_000.0
+
+    # a pure spin has no roofline; a missing dimension yields nothing
+    assert _core.corpus_roofline_spec("oracle:busy", "{}", None) is None
+    assert _core.corpus_roofline_spec("corpus:gemm_bf16", json.dumps({"M": 4096}), None) is None
+
+
+def test_corpus_roofline_spec_rejects_a_non_object_shape() -> None:
+    with pytest.raises(ValueError):
+        _core.corpus_roofline_spec("corpus:gemm_bf16", "[1,2,3]", None)
+
+
 def test_achieved_bandwidth_matches_the_o2_formula() -> None:
     bytes_per_array = 1024.0 * 1024.0 * 1024.0
     p50_us = 3300.0

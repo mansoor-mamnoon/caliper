@@ -17,9 +17,10 @@
 //! Passing a [`crate::fixture::FixturePlayer`] replays a recorded session with
 //! no GPU.
 
+use caliper_core::graph::{self, GraphChoice};
 use caliper_core::schema::{KernelLabel, Ptxas, Record};
 use caliper_core::warmup::WarmupPlan;
-use caliper_core::{reduce, ParsedKernel, ReduceInput};
+use caliper_core::{reduce, ParsedKernel, ReduceInput, RooflineSpec};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{GpuError, Result};
@@ -58,6 +59,11 @@ pub struct BenchOpts {
     pub dtype: Option<String>,
     /// Implementation family, recorded on the kernel label.
     pub kernel_impl: Option<String>,
+    /// Roofline inputs (dtype + FLOP / HBM-byte counts) for the workload, when
+    /// the caller can supply them (e.g. inferred for a `corpus:*` target).
+    /// Drives `Record.roofline`.
+    #[serde(default)]
+    pub roofline: Option<RooflineSpec>,
 }
 
 impl Default for BenchOpts {
@@ -73,6 +79,7 @@ impl Default for BenchOpts {
             warmup: WarmupPlan::default(),
             dtype: None,
             kernel_impl: None,
+            roofline: None,
         }
     }
 }
@@ -87,6 +94,34 @@ impl Default for BenchOpts {
 /// Propagates a device error, and any [`caliper_core::PipelineError`] from the
 /// reduction (as [`GpuError::Unsupported`] carrying the message).
 pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<Record> {
+    run_inner(layer, opts).map(|(record, _)| record)
+}
+
+/// Like [`run`], but also returns the requested per-launch quantiles (each `q`
+/// in `0.0..=1.0`) of the GPU-event times, in microseconds -- for a
+/// Triton-style `do_bench(quantiles=...)`.
+///
+/// # Errors
+/// As [`run`].
+pub fn run_quantiles<L: DeviceLayer + ?Sized>(
+    layer: &mut L,
+    opts: &BenchOpts,
+    quantiles: &[f64],
+) -> Result<(Record, Vec<f64>)> {
+    let (record, input) = run_inner(layer, opts)?;
+    let qs = if quantiles.is_empty() {
+        Vec::new()
+    } else {
+        caliper_core::reduce_quantiles(&input, quantiles)
+            .map_err(|e| GpuError::Unsupported(format!("reduction failed: {e}")))?
+    };
+    Ok((record, qs))
+}
+
+fn run_inner<L: DeviceLayer + ?Sized>(
+    layer: &mut L,
+    opts: &BenchOpts,
+) -> Result<(Record, ReduceInput)> {
     let machine = layer.snapshot()?;
 
     let clocks_locked = if opts.lock_clocks {
@@ -100,8 +135,9 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
         false
     };
 
-    // GraphMode::Auto is resolved on-device by timing a single launch; until the
-    // real launcher exists it behaves as Off.
+    // The `LaunchSpec` hint: `on` always captures, `off`/`auto` start eager
+    // (the launcher times one launch and may switch `auto` to capture, then
+    // reports the real choice back in `RawSamples`).
     let use_graph = matches!(opts.cuda_graph, GraphMode::On);
 
     let mut throttle_reasons = layer.throttle_reasons()?; // "before" poll
@@ -113,6 +149,21 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
         use_graph,
     };
     let raw = layer.time_batches(&spec)?;
+
+    // What CUDA-graph mode actually resolved to: the launcher's own report
+    // wins, else the policy over its single-launch probe. The flag notes a
+    // capture always (it explains a near-zero launch overhead), and an eager
+    // run only when `auto` actively chose it -- an explicit `off` is not news.
+    let graph_choice = match raw.graph_used {
+        Some(true) => GraphChoice::Capture,
+        Some(false) => GraphChoice::Eager,
+        None => graph::resolve(opts.cuda_graph.as_str(), raw.single_launch_us),
+    };
+    let graph_flag = match graph_choice {
+        GraphChoice::Capture => Some("graph-captured"),
+        GraphChoice::Eager if matches!(opts.cuda_graph, GraphMode::Auto) => Some("graph-eager"),
+        _ => None,
+    };
 
     throttle_reasons.extend(layer.throttle_reasons()?); // "after" poll
     throttle_reasons.extend(raw.throttle_reasons);
@@ -170,13 +221,15 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
         block_size: raw.block_size,
         grid_blocks: raw.grid_blocks,
         driver_occupancy_blocks,
-        // A roofline spec (dtype + FLOP / HBM-byte counts) is workload-specific
-        // and not yet supplied by the launcher; until then the roofline section
-        // stays empty here.
-        roofline: None,
+        roofline: opts.roofline.clone(),
     };
 
-    reduce(input).map_err(|e| GpuError::Unsupported(format!("reduction failed: {e}")))
+    let mut record = reduce(input.clone())
+        .map_err(|e| GpuError::Unsupported(format!("reduction failed: {e}")))?;
+    if let Some(flag) = graph_flag {
+        record.flags.push(flag.to_string());
+    }
+    Ok((record, input))
 }
 
 /// From a probed module, the resource usage of the kernel matching `kernel_key`,
@@ -199,15 +252,27 @@ fn pick_ptxas(kernels: &[ParsedKernel], kernel_key: &str) -> Option<Ptxas> {
 /// As [`run`], plus a fixture parse error, or [`GpuError::FixtureMismatch`] if
 /// the recording has calls left over.
 pub fn run_replay(recording: &str, opts: &BenchOpts) -> Result<Record> {
+    run_replay_quantiles(recording, opts, &[]).map(|(record, _)| record)
+}
+
+/// [`run_replay`] plus the requested per-launch quantiles (microseconds).
+///
+/// # Errors
+/// As [`run_replay`].
+pub fn run_replay_quantiles(
+    recording: &str,
+    opts: &BenchOpts,
+    quantiles: &[f64],
+) -> Result<(Record, Vec<f64>)> {
     let mut layer = FixturePlayer::from_jsonl(recording)?;
-    let record = run(&mut layer, opts)?;
+    let out = run_quantiles(&mut layer, opts, quantiles)?;
     if layer.remaining() != 0 {
         return Err(GpuError::FixtureMismatch {
             expected: "recording fully consumed".to_string(),
             actual: format!("{} call(s) left over", layer.remaining()),
         });
     }
-    Ok(record)
+    Ok(out)
 }
 
 #[cfg(test)]
