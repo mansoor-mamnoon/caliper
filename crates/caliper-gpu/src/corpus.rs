@@ -51,6 +51,16 @@ pub const REFERENCE_TARGETS: &[(&str, &str, &str)] = &[
         "corpus:softmax",
         "row-wise softmax forward (roofline / torch reference)",
     ),
+    (
+        "corpus:attention_fwd",
+        "corpus:attention_fwd",
+        "FlashAttention-style forward (roofline / SDPA reference)",
+    ),
+    (
+        "corpus:attention_bwd",
+        "corpus:attention_bwd",
+        "FlashAttention-style backward (roofline / SDPA-backward reference)",
+    ),
 ];
 
 /// Every `corpus:*` target: the oracles plus the reference kernels.
@@ -90,6 +100,14 @@ mod tests {
         assert_eq!(resolve("corpus:gemm"), Some("corpus:gemm_bf16"));
         assert_eq!(resolve("corpus:rmsnorm"), Some("corpus:rmsnorm"));
         assert_eq!(resolve("corpus:softmax"), Some("corpus:softmax"));
+        assert_eq!(
+            resolve("corpus:attention_fwd"),
+            Some("corpus:attention_fwd")
+        );
+        assert_eq!(
+            resolve("corpus:attention_bwd"),
+            Some("corpus:attention_bwd")
+        );
         assert_eq!(resolve("corpus:o9"), None);
         assert_eq!(resolve("mykernel.py::fn"), None);
         assert!(is_corpus_target("corpus:o1"));

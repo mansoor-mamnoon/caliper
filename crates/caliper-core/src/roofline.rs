@@ -349,6 +349,14 @@ fn shape_num(shape: &crate::schema::JsonMap, key: &str) -> Option<f64> {
         .filter(|v| v.is_finite() && *v > 0.0)
 }
 
+/// A `bool` flag in a shape map (e.g. `"causal"`), defaulting to `false`.
+fn shape_flag(shape: &crate::schema::JsonMap, key: &str) -> bool {
+    shape
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
 /// Guard against a shape big enough to overflow the FLOP / byte arithmetic to
 /// infinity -- `serde_json` cannot serialise a non-finite float.
 fn finite_spec(spec: RooflineSpec) -> Option<RooflineSpec> {
@@ -361,9 +369,11 @@ fn finite_spec(spec: RooflineSpec) -> Option<RooflineSpec> {
 ///
 /// Recognises `corpus:gemm*` (needs `M` / `N` / `K` in `shape`),
 /// `corpus:rmsnorm*` / `corpus:softmax*` (needs `ROWS` / `COLS`),
-/// `oracle:triad` (needs `n`), and `oracle:fma_peak` (needs `threads` /
-/// `iters` / `ilp`). Returns `None` for a kernel with no meaningful roofline
-/// (a pure spin) or a shape that is missing a dimension.
+/// `corpus:attention_fwd*` / `corpus:attention_bwd*` (needs `B` / `H` / `S` /
+/// `D`, plus an optional `causal` flag), `oracle:triad` (needs `n`), and
+/// `oracle:fma_peak` (needs `threads` / `iters` / `ilp`). Returns `None` for a
+/// kernel with no meaningful roofline (a pure spin) or a shape that is missing
+/// a dimension.
 ///
 /// The reference-kernel arms read upper-case dimension names (the casing the
 /// corpus kernels and Appendix B use); the oracle arms read lower-case (the
@@ -426,6 +436,37 @@ pub fn corpus_spec(
             dtype: dt.to_string(),
             flops: 5.0 * rows * cols,
             bytes_hbm: 2.0 * rows * cols * dtype_bytes(dt),
+        });
+    }
+
+    // Attention (FlashAttention-style), needs `B` / `H` / `S` / `D`, plus an
+    // optional `causal` flag. The two `S x S x D` matmuls (QK^T and P@V)
+    // dominate at `4 * B*H*S*S*D` FLOPs; the softmax is < 2% and omitted.
+    // Causal work is the lower triangle, ~half. Backward is ~2.5x forward
+    // (FlashAttention-2). HBM traffic is IO-aware -- O(S), not O(S^2): the
+    // forward streams Q/K/V in and O out (`4 * B*H*S*D`); the backward also
+    // reads O and dO and writes dQ/dK/dV (`8 * B*H*S*D`). Grouped-query
+    // attention's smaller K/V footprint is not modelled (a slight overcount).
+    if key.contains("attention") {
+        let (b, h, s, d) = (
+            shape_num(shape, "B")?,
+            shape_num(shape, "H")?,
+            shape_num(shape, "S")?,
+            shape_num(shape, "D")?,
+        );
+        let dt = dtype.unwrap_or("bf16");
+        let elem = dtype_bytes(dt);
+        let causal = if shape_flag(shape, "causal") {
+            0.5
+        } else {
+            1.0
+        };
+        let is_bwd = key.contains("bwd") || key.contains("backward");
+        let fwd_flops = 4.0 * b * h * s * s * d;
+        return finite_spec(RooflineSpec {
+            dtype: dt.to_string(),
+            flops: causal * if is_bwd { 2.5 * fwd_flops } else { fwd_flops },
+            bytes_hbm: (if is_bwd { 8.0 } else { 4.0 }) * b * h * s * d * elem,
         });
     }
 
@@ -656,6 +697,36 @@ mod tests {
     }
 
     #[test]
+    fn corpus_spec_for_attention_fwd_counts_two_matmuls_and_io_aware_bytes() {
+        let dims = [("B", 2.0), ("H", 16.0), ("S", 4096.0), ("D", 128.0)];
+        let s = corpus_spec("corpus:attention_fwd", &shape(&dims), Some("bf16")).unwrap();
+        approx(s.flops, 4.0 * 2.0 * 16.0 * 4096.0 * 4096.0 * 128.0);
+        approx(s.bytes_hbm, 4.0 * 2.0 * 16.0 * 4096.0 * 128.0 * 2.0); // Q,K,V in + O out
+                                                                      // compute-bound: the S x S x D matmuls dwarf the O(S) traffic.
+        assert_eq!(analyze("sm_80", &s, 1.0e-3).bound, Bound::Compute);
+    }
+
+    #[test]
+    fn corpus_spec_for_attention_causal_halves_the_flops_only() {
+        let dims = [("B", 1.0), ("H", 8.0), ("S", 2048.0), ("D", 64.0)];
+        let dense = corpus_spec("corpus:attention_fwd", &shape(&dims), Some("bf16")).unwrap();
+        let mut causal_shape = shape(&dims);
+        causal_shape.insert("causal".to_string(), serde_json::json!(true));
+        let causal = corpus_spec("corpus:attention_fwd", &causal_shape, Some("bf16")).unwrap();
+        approx(causal.flops, dense.flops / 2.0);
+        approx(causal.bytes_hbm, dense.bytes_hbm); // byte count is unchanged
+    }
+
+    #[test]
+    fn corpus_spec_for_attention_bwd_is_2_5x_the_forward_flops() {
+        let dims = [("B", 1.0), ("H", 8.0), ("S", 2048.0), ("D", 64.0)];
+        let fwd = corpus_spec("corpus:attention_fwd", &shape(&dims), Some("bf16")).unwrap();
+        let bwd = corpus_spec("corpus:attention_bwd", &shape(&dims), Some("bf16")).unwrap();
+        approx(bwd.flops, 2.5 * fwd.flops);
+        approx(bwd.bytes_hbm, 2.0 * fwd.bytes_hbm); // 8x vs 4x B*H*S*D
+    }
+
+    #[test]
     fn corpus_spec_for_triad_is_memory_bound() {
         let s = corpus_spec("oracle:triad", &shape(&[("n", 1.0e8)]), None).unwrap();
         approx(s.flops, 2.0e8);
@@ -684,5 +755,11 @@ mod tests {
         assert!(corpus_spec("corpus:gemm_bf16", &shape(&[("M", 4096.0)]), None).is_none());
         assert!(corpus_spec("corpus:rmsnorm", &shape(&[("ROWS", 4096.0)]), None).is_none());
         assert!(corpus_spec("corpus:softmax", &shape(&[]), None).is_none());
+        assert!(corpus_spec(
+            "corpus:attention_fwd",
+            &shape(&[("B", 1.0), ("H", 8.0), ("S", 2048.0)]),
+            None
+        )
+        .is_none());
     }
 }
