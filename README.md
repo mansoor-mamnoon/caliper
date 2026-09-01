@@ -53,7 +53,7 @@ that you can tell whether to trust it.
 | Layer | Language | What lives here |
 | --- | --- | --- |
 | `crates/caliper-core` | Rust | All measurement logic: the result schema, statistics, steady-state detection, the reduction pipeline, the roofline and occupancy models, `ptxas` / `cuobjdump` / HIP parsing, the sweep spec parser, the autotune cache key, the oracle checks and the `selftest` report. No GPU or Python dependency; tested with `cargo test`. |
-| `crates/caliper-gpu` | Rust | The device layer: three ports (launch, clocks, device info, module probe), a fixture player that replays a recorded session with no GPU, a recorder, and the feature-gated real CUDA/NVML implementations. |
+| `crates/caliper-gpu` | Rust | The device layer: four ports (launch, clocks, device info, module probe), a fixture player that replays a recorded session with no GPU, a recorder, and the feature-gated real CUDA/NVML implementations. |
 | `crates/caliper-ffi` | Rust (PyO3) | A thin binding layer that exposes the core to Python as `caliper._core`. |
 | `python/caliper` | Python | The public API, the command-line tool, the `do_bench` shim, YAML/Parquet I/O, and orchestration (`sweep`). |
 | `crates/caliper-gpu/kernels` *(Colab)* | CUDA C++ | The on-device oracle kernels O1-O7. |
@@ -67,8 +67,12 @@ The full interface, data schema, and validation strategy are written up in
 from caliper import bench, do_bench, sweep
 
 # one kernel, from a recorded device session (a live callable needs a CUDA host)
-result = bench("corpus:gemm", recording=open("session.jsonl").read(),
-               shape={"M": 4096, "N": 4096, "K": 4096}, dtype="bf16")
+result = bench(
+    "corpus:gemm",
+    recording=open("session.jsonl").read(),
+    shape={"M": 4096, "N": 4096, "K": 4096},
+    dtype="bf16",
+)
 print(result.p50_us, result.roofline_pct, result.ptxas.spill_stores_bytes)
 
 # a Triton script only changes its import
