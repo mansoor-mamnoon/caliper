@@ -217,3 +217,26 @@ tagged release onward.
   (`tests/l6_e2e/test_autotune_cache.py` on a Colab A100; the hit/miss logic is
   covered on the no-GPU path). `bench()` gains a `layout=` argument, threaded
   onto the kernel label.
+- `caliper.live_timing_ms(fn, warmup=25, rep=100, grad_to_none=None)` -- the
+  CUDA-event timing loop factored out of `do_bench()` (à la
+  `triton.testing.do_bench`), returned as raw unreduced per-launch millisecond
+  samples; `do_bench()` now just reduces them. `_check_live_deps(caller)` is
+  the shared "needs PyTorch + a CUDA device" guard both paths raise through.
+- The reference kernel corpus (`python/caliper/corpus`): `gemm`, `rmsnorm`,
+  `softmax`, each a Triton implementation plus a vendor baseline
+  (`torch.matmul` / a plain-torch reference / `torch.softmax`). Unlike the
+  CUDA-C++ oracle kernels, these don't need the (still-stubbed) Rust launcher
+  -- `run()` times itself directly via `live_timing_ms` and builds its own
+  machine fingerprint from `torch.cuda` device introspection, so the corpus
+  genuinely runs end to end on any CUDA host today. Every kernel module
+  imports cleanly without Triton installed; only `run()` needs it. See
+  `docs/corpus.md` for the roofline formula, baseline, and Triton-API pin
+  behind each one. `gemm.kernel` is `@triton.autotune`-wrapped over
+  `gemm.CONFIGS` (5 block tilings), satisfying the autotune-cache contract in
+  `tests/l6_e2e/test_autotune_cache.py`. `caliper-gpu[triton]` (torch +
+  triton) is a new optional extra.
+- `roofline::corpus_spec` gains `rmsnorm` and `softmax` arms (needs `ROWS` /
+  `COLS` in `shape`): 4 and 5 FLOPs/element respectively, `2*ROWS*COLS*
+  dtype_bytes` HBM traffic for both (read the input, write the output).
+  `corpus:rmsnorm` and `corpus:softmax` are added as reference targets
+  alongside `corpus:gemm`.

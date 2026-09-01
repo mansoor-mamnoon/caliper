@@ -17,10 +17,13 @@ that you can tell whether to trust it.
 
 > **Status: early development.** The measurement engine, result schema, roofline
 > and occupancy models, `ptxas` parsing, the sweep planner, the `do_bench` shim,
-> and the command-line tool are built and tested. The on-device launcher (real
-> CUDA events, NVML clock locking, the reference kernels) is still a stub, so for
-> now everything runs against recorded device sessions -- no GPU required. APIs
-> and output formats will change until the first tagged release.
+> and the command-line tool are built and tested. The on-device launcher for the
+> CUDA-C++ oracle kernels (real CUDA events, NVML clock locking) is still a stub,
+> so `bench()` runs against recorded device sessions for now -- no GPU required.
+> The reference kernel corpus (`gemm`, `rmsnorm`, `softmax` -- Triton, not CUDA
+> C++) doesn't go through that launcher and genuinely runs on any CUDA host
+> today; see [`docs/corpus.md`](docs/corpus.md). APIs and output formats will
+> change until the first tagged release.
 
 ## What it does
 
@@ -46,6 +49,10 @@ that you can tell whether to trust it.
   against the schema.
 - **Is Triton-compatible** -- `caliper.do_bench` matches `triton.testing.do_bench`
   argument for argument, so a script can swap the import.
+- **Ships a reference kernel corpus** -- `gemm`, `rmsnorm`, `softmax`, each a
+  Triton implementation pinned to a content hash plus a vendor baseline
+  (cuBLAS / torch), timed live on any CUDA host and checked against the same
+  roofline model. See [`docs/corpus.md`](docs/corpus.md).
 
 ## How it's built
 
@@ -55,6 +62,7 @@ that you can tell whether to trust it.
 | `crates/caliper-gpu` | Rust | The device layer: four ports (launch, clocks, device info, module probe), a fixture player that replays a recorded session with no GPU, a recorder, and the feature-gated real CUDA/NVML implementations. |
 | `crates/caliper-ffi` | Rust (PyO3) | A thin binding layer that exposes the core to Python as `caliper._core`. |
 | `python/caliper` | Python | The public API, the command-line tool, the `do_bench` shim, YAML/Parquet I/O, and orchestration (`sweep`). |
+| `python/caliper/corpus` | Python + Triton | The reference kernel corpus (`gemm`, `rmsnorm`, `softmax`) and its vendor baselines -- runs live on any CUDA host, independent of the (still-stubbed) Rust launcher. See [`docs/corpus.md`](docs/corpus.md). |
 | `crates/caliper-gpu/kernels` *(Colab)* | CUDA C++ | The on-device oracle kernels O1-O7. |
 
 The full interface, data schema, and validation strategy are written up in
@@ -81,6 +89,11 @@ ms = do_bench(fn, quantiles=[0.5, 0.2, 0.8])
 from pathlib import Path
 
 grid = sweep(Path("spec.yaml"))
+
+# a reference kernel, timed live (needs a CUDA host + `pip install 'caliper-gpu[triton]'`)
+from caliper.corpus.kernels import gemm
+
+result = gemm.run({"shape": {"m": 4096, "n": 4096, "k": 4096}, "dtype": "bf16", "layout": "row"})
 ```
 
 ```
@@ -104,10 +117,12 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"      # builds the Rust extension via maturin
 ```
 
-Optional extras: `caliper-gpu[sweep]` (PyYAML, for reading sweep specs) and
+Optional extras: `caliper-gpu[sweep]` (PyYAML, for reading sweep specs),
 `caliper-gpu[parquet]` (pyarrow, for `Grid.to_parquet` / `caliper validate` on
-`.parquet`). The library targets Linux with an NVIDIA GPU (CUDA 12.1+); the core
-and its tests have no GPU dependency and run anywhere.
+`.parquet`), and `caliper-gpu[triton]` (torch + triton, for the reference
+kernel corpus -- installs anywhere, only needs a CUDA device to actually run).
+The library targets Linux with an NVIDIA GPU (CUDA 12.1+); the core and its
+tests have no GPU dependency and run anywhere.
 
 ## Development
 
