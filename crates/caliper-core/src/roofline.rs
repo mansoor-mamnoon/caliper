@@ -364,6 +364,10 @@ fn finite_spec(spec: RooflineSpec) -> Option<RooflineSpec> {
 /// `oracle:triad` (needs `n`), and `oracle:fma_peak` (needs `threads` /
 /// `iters` / `ilp`). Returns `None` for a kernel with no meaningful roofline
 /// (a pure spin) or a shape that is missing a dimension.
+///
+/// The reference-kernel arms read upper-case dimension names (the casing the
+/// corpus kernels and Appendix B use); the oracle arms read lower-case (the
+/// casing the oracle harness passes). `shape` lookups are case-sensitive.
 #[must_use]
 pub fn corpus_spec(
     kernel_key: &str,

@@ -21,8 +21,9 @@ that you can tell whether to trust it.
 > CUDA-C++ oracle kernels (real CUDA events, NVML clock locking) is still a stub,
 > so `bench()` runs against recorded device sessions for now -- no GPU required.
 > The reference kernel corpus (`gemm`, `rmsnorm`, `softmax` -- Triton, not CUDA
-> C++) doesn't go through that launcher and genuinely runs on any CUDA host
-> today; see [`docs/corpus.md`](docs/corpus.md). APIs and output formats will
+> C++) doesn't go through that launcher, so it runs without waiting on it --
+> on any CUDA host, with on-device verification on Colab like the other GPU
+> tiers; see [`docs/corpus.md`](docs/corpus.md). APIs and output formats will
 > change until the first tagged release.
 
 ## What it does

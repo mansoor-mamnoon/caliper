@@ -3,8 +3,15 @@
 `python/caliper/corpus/kernels/` pairs a Triton implementation with a vendor
 baseline for a handful of workloads every kernel author recognizes: `gemm`,
 `rmsnorm`, `softmax` today (`attention_fwd` / `attention_bwd` land later). Each
-one is a `caliper:` target on its own — `corpus:gemm`, `corpus:rmsnorm`,
-`corpus:softmax` — and a natural thing to point `sweep()` at.
+one is a `corpus:` target on its own — `corpus:gemm`, `corpus:rmsnorm`,
+`corpus:softmax`.
+
+`corpus:gemm` also plugs into `sweep()` (its `{M, N, K}` shape is one the sweep
+spec grammar already understands, and its autotune configs feed the config
+cache). `rmsnorm` and `softmax` are `{ROWS, COLS}` workloads, which the spec
+grammar doesn't model yet, so today they run only through a direct
+`kernel.run(cell, config)` call; wiring them into `sweep()` waits on an
+elementwise shape kind in `crates/caliper-core/src/spec.rs`.
 
 ## How a corpus kernel actually runs
 
@@ -18,9 +25,10 @@ CUDA device, and nothing else — so `caliper.corpus.kernels.gemm.run()` (and
 `rmsnorm`, `softmax`) time themselves directly with
 [`caliper.live_timing_ms`](../python/caliper/api.py), the same CUDA-event loop
 `do_bench()` uses: a handful of warm-up launches, an L2-flushing buffer zeroed
-between reps, and a `torch.cuda.Event` pair around every timed launch. It's a
-genuinely working, on-device measurement today, independent of the
-still-unfinished launcher.
+between reps, and a `torch.cuda.Event` pair around every timed launch. So the
+corpus runs without waiting on the still-unfinished launcher; on-device
+verification is on Colab (`docs/plan.md` §0.5), same as the rest of the GPU
+tiers.
 
 The trade a caller should know about: this path skips the Rust reduction
 pipeline entirely — no clock lock, no L2-flush *accounting* (the buffer zero
