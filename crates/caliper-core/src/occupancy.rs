@@ -20,7 +20,9 @@
 //! follows `cuda_occupancy.h`:
 //!
 //! * Registers are allocated per warp, the whole-warp total rounded up to 256.
-//!   `blocks_by_regs = (regs_per_sm / regs_per_warp) / warps_per_block`.
+//!   The number of warps the register file then holds is rounded *down* to the
+//!   warp-allocation granularity (4 on cc >= 3.0), matching NVIDIA's
+//!   calculator. `blocks_by_regs = warps_the_reg_file_holds / warps_per_block`.
 //! * Shared memory per block is `(requested + reserved)` rounded up to the arch
 //!   allocation unit (128 B on cc >= 7.0). `blocks_by_smem = smem_per_sm / that`.
 //!   Reserved shared memory per block is 1024 B on cc >= 8.0, else 0. A kernel
@@ -32,14 +34,16 @@
 //! of registers, shared memory, warps, blocks to hit that minimum -- a tunable
 //! resource is named ahead of a hard architectural cap.
 //!
-//! Warp-count rounding for non-multiple-of-4 block sizes is not modelled; it
-//! only perturbs odd launch geometries and never the register/shared-memory
-//! math above.
+//! `warps_per_block` is `ceil(threads_per_block / 32)`; a block-size rounding to
+//! a whole number of warps is the only warp-count quantisation applied.
 
 use serde::{Deserialize, Serialize};
 
 const WARP_SIZE: u32 = 32;
 const REG_ALLOC_GRANULARITY: u32 = 256;
+/// Warps are handed to an SM in groups of this many (`warpAllocationGranularity`
+/// in `cuda_occupancy.h`, 4 for every compute capability this table covers).
+const WARP_ALLOC_GRANULARITY: u32 = 4;
 
 /// Fixed per-SM limits for one compute capability.
 #[derive(Debug, Clone, Copy)]
@@ -70,7 +74,7 @@ fn limits(arch: &str) -> Option<ArchLimits> {
             regs_per_sm: 65536,
             smem_per_sm: 96 * 1024,
             reserved_smem_per_block: 0,
-            smem_alloc_unit: 256,
+            smem_alloc_unit: 128,
         },
         // Turing
         "sm_75" => ArchLimits {
@@ -79,7 +83,7 @@ fn limits(arch: &str) -> Option<ArchLimits> {
             regs_per_sm: 65536,
             smem_per_sm: 64 * 1024,
             reserved_smem_per_block: 0,
-            smem_alloc_unit: 256,
+            smem_alloc_unit: 128,
         },
         // Ampere GA100
         "sm_80" => ArchLimits {
@@ -194,6 +198,11 @@ fn round_up(x: u32, m: u32) -> u32 {
     x.div_ceil(m) * m
 }
 
+fn round_down(x: u32, m: u32) -> u32 {
+    debug_assert!(m > 0);
+    x - (x % m)
+}
+
 /// Theoretical occupancy for a kernel on `arch`.
 ///
 /// `smem_bytes_per_block` is the kernel's total static + dynamic shared memory
@@ -215,7 +224,9 @@ pub fn theoretical_occupancy(
     let warps_per_block = threads_per_block.div_ceil(WARP_SIZE).max(1);
 
     let regs_per_warp = round_up(regs_per_thread.max(1) * WARP_SIZE, REG_ALLOC_GRANULARITY);
-    let by_regs = (l.regs_per_sm / regs_per_warp) / warps_per_block;
+    let warps_the_reg_file_holds =
+        round_down(l.regs_per_sm / regs_per_warp, WARP_ALLOC_GRANULARITY);
+    let by_regs = warps_the_reg_file_holds / warps_per_block;
 
     let by_smem = if smem_bytes_per_block == 0 {
         u32::MAX

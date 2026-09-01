@@ -125,6 +125,25 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
         Err(other) => return Err(other),
     };
 
+    // The driver's own occupancy number, when the launcher reported a block
+    // size to ask about. `Unsupported`/`PermissionDenied`/`NoDevice` (and the
+    // "pending" stub on a CUDA host until the call is wired) mean "not
+    // available" -- the occupancy model in `reduce` then stands alone.
+    let driver_occupancy_blocks = match raw.block_size {
+        Some(bs) => match layer.max_active_blocks_per_sm(
+            &opts.kernel_key,
+            bs,
+            raw.dynamic_smem_bytes.unwrap_or(0),
+        ) {
+            Ok(v) => v,
+            Err(GpuError::Unsupported(_) | GpuError::PermissionDenied(_) | GpuError::NoDevice) => {
+                None
+            }
+            Err(other) => return Err(other),
+        },
+        None => None,
+    };
+
     let clock_state = layer.read()?;
     if clocks_locked {
         let _ = layer.unlock();
@@ -148,11 +167,12 @@ pub fn run<L: DeviceLayer + ?Sized>(layer: &mut L, opts: &BenchOpts) -> Result<R
             dtype: opts.dtype.clone(),
             ..KernelLabel::default()
         },
-        // Launch geometry and a roofline spec are not yet reported by the
-        // launcher port; the on-device path fills these in. Until then the
-        // occupancy and roofline sections stay empty.
-        block_size: None,
-        grid_blocks: None,
+        block_size: raw.block_size,
+        grid_blocks: raw.grid_blocks,
+        driver_occupancy_blocks,
+        // A roofline spec (dtype + FLOP / HBM-byte counts) is workload-specific
+        // and not yet supplied by the launcher; until then the roofline section
+        // stays empty here.
         roofline: None,
     };
 

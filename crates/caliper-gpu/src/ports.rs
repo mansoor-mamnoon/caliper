@@ -39,4 +39,23 @@ pub trait DeviceInfo {
 pub trait ModuleProbe {
     /// Resource usage for the module `kernel_key` was compiled into.
     fn probe(&mut self, kernel_key: &str) -> Result<Vec<ParsedKernel>>;
+
+    /// The driver's own `cuOccupancyMaxActiveBlocksPerMultiprocessor` for this
+    /// kernel at `block_size` threads and `dynamic_smem_bytes` of dynamic
+    /// shared memory.
+    ///
+    /// `Ok(None)` means the probe cannot answer (no device / no driver handle),
+    /// in which case [`caliper_core::occupancy`]'s model is the only source.
+    /// The default returns `Ok(None)`; the real CUDA probe overrides it (and,
+    /// until the driver call is wired up on a CUDA host, returns a "pending"
+    /// error that [`crate::bench::run`] treats as "not available").
+    fn max_active_blocks_per_sm(
+        &mut self,
+        kernel_key: &str,
+        block_size: u32,
+        dynamic_smem_bytes: u32,
+    ) -> Result<Option<u32>> {
+        let _ = (kernel_key, block_size, dynamic_smem_bytes);
+        Ok(None)
+    }
 }

@@ -111,5 +111,11 @@ tagged release onward.
 - `reduce()` now fills `Record.occupancy` and `Record.roofline` when the caller
   supplies launch geometry (`block_size`, `grid_blocks`) and a roofline spec
   (dtype + FLOP / HBM-byte counts) on `ReduceInput`; both sections stay empty
-  otherwise. The on-device `ModuleProbe` will also cross-check the model against
-  the driver's `cuOccupancyMaxActiveBlocksPerMultiprocessor`.
+  otherwise.
+- `ModuleProbe` gains `max_active_blocks_per_sm` -- the driver's
+  `cuOccupancyMaxActiveBlocksPerMultiprocessor` for a launch. The default and
+  the fixture player answer "unavailable"; the `real` CUDA probe returns a
+  pending stub until the driver call is wired on a CUDA host. When it and the
+  occupancy model disagree by more than one block the record is flagged
+  `occupancy-model-mismatch`. `RawSamples` carries `block_size` / `grid_blocks`
+  / `dynamic_smem_bytes` so the launcher can feed both the model and the check.

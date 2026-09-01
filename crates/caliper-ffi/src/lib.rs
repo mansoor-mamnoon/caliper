@@ -122,22 +122,31 @@ fn parse_ptxas(text: &str) -> PyResult<String> {
 
 /// Theoretical occupancy for a kernel on `arch` from the CUDA occupancy model.
 /// Returns `{theoretical, active_warps_per_sm, active_blocks_per_sm, limiter}`
-/// as JSON, or `None` if `arch` is unknown, `threads_per_block` is 0 or above
-/// 1024, or `regs_per_thread` exceeds 255.
+/// as JSON, or `None` if `arch` is not in the model's table. Raises
+/// ``ValueError`` if `threads_per_block` is 0 or above 1024, or
+/// `regs_per_thread` is 0 or above 255.
 #[pyfunction]
 fn theoretical_occupancy(
     arch: &str,
     regs_per_thread: u32,
     smem_bytes_per_block: u32,
     threads_per_block: u32,
-) -> Option<String> {
-    let est = caliper_core::occupancy::theoretical_occupancy(
+) -> PyResult<Option<String>> {
+    if threads_per_block == 0 || threads_per_block > 1024 {
+        return Err(PyValueError::new_err(
+            "threads_per_block must be in 1..=1024",
+        ));
+    }
+    if regs_per_thread == 0 || regs_per_thread > 255 {
+        return Err(PyValueError::new_err("regs_per_thread must be in 1..=255"));
+    }
+    Ok(caliper_core::occupancy::theoretical_occupancy(
         arch,
         regs_per_thread,
         smem_bytes_per_block,
         threads_per_block,
-    )?;
-    Some(serde_json::to_string(&est).expect("OccupancyEstimate serialises"))
+    )
+    .map(|est| serde_json::to_string(&est).expect("OccupancyEstimate serialises")))
 }
 
 // --- roofline ----------------------------------------------------------------

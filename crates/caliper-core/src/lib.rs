@@ -23,7 +23,10 @@ pub use occupancy::{theoretical_occupancy, Limiter, OccupancyEstimate};
 pub use oracles::{fit_line, LineFit, OracleCheck};
 pub use pipeline::{flush_buffer_bytes, invalidate, reduce, PipelineError, ReduceInput};
 pub use ptxas_parse::{parse_any as parse_ptxas, ParsedKernel, PtxasParseError};
-pub use roofline::{analyze as roofline_analyze, Bound, RooflineResult, RooflineSpec};
+pub use roofline::{
+    analyze as roofline_analyze, peak_compute_tflops, peak_fp32_fma_tflops, peak_hbm_gbps,
+    peak_tensor_tflops, Bound, RooflineResult, RooflineSpec,
+};
 pub use schema::{Record, SCHEMA_VERSION};
 pub use stats::{cross_pass_cov, summarize, Summary};
 pub use warmup::{steady_state, Warmup, WarmupOpts, WarmupPlan};

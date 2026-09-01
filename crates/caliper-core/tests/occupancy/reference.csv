@@ -1,22 +1,76 @@
 # CUDA theoretical-occupancy reference values.
 #
-# Computed against the CUDA Occupancy Calculator model:
-#   - CUDA C Programming Guide, "Compute Capabilities" technical-specification table
-#     (max warps/SM, max blocks/SM, 32-bit registers/SM, shared memory/SM).
-#   - cuda_occupancy.h: registers are allocated per warp, the total rounded up to
-#     256; shared memory is (per-block bytes + reserved) rounded up to the arch's
-#     allocation unit (128 B on cc >= 7.0). Reserved shared memory per block is
-#     1024 B on cc >= 8.0, else 0.
+# These are the numbers NVIDIA's CUDA Occupancy Calculator (and
+# cudaOccMaxActiveBlocksPerMultiprocessor) produce for each (arch, regs, smem,
+# block) tuple. Each row is derived below by hand from two published inputs so a
+# reviewer can check it without running caliper:
 #
-# The `limiter` is the resource that bounds active blocks, checked in the order
-# registers, shared memory, warps, blocks (a tunable resource is reported ahead
-# of a hard architectural cap).
+#   (a) the per-SM limits from the CUDA C Programming Guide, "Compute
+#       Capabilities" -> "Technical Specifications per Compute Capability":
+#
+#         arch    maxWarps/SM  maxBlocks/SM  regs/SM  smem/SM
+#         sm_70   64           32            65536    96 KiB
+#         sm_75   32           16            65536    64 KiB
+#         sm_80   64           32            65536    164 KiB   (reserved 1 KiB/block)
+#         sm_86   48           16            65536    100 KiB   (reserved 1 KiB/block)
+#         sm_89   48           24            65536    100 KiB   (reserved 1 KiB/block)
+#         sm_90   64           32            65536    228 KiB   (reserved 1 KiB/block)
+#         sm_120  48           24            65536    100 KiB   (reserved 1 KiB/block)  [provisional, confirm on-device]
+#
+#   (b) the allocation rules from cuda_occupancy.h: registers are allocated per
+#       warp with the whole-warp total rounded up to 256; the warp count the
+#       register file then holds is rounded down to 4; shared memory per block is
+#       (request + reserved) rounded up to the 128 B allocation unit.
+#
+# active_blocks = min(byRegs, bySmem, byWarps, maxBlocks); active_warps =
+# min(active_blocks * warpsPerBlock, maxWarps); occupancy = active_warps/maxWarps.
+# limiter = first of {registers, shared memory, warps, blocks} equal to
+# active_blocks (a tunable resource is named before a hard cap).
+#
+# --- per-row derivation -----------------------------------------------------
+# sm_70,48,0,256   : regs/warp=round_up(48*32,256)=1536; warps held=round_down(65536/1536,4)=40;
+#                    byRegs=40/8=5; byWarps=64/8=8 -> 5 blocks, 40 warps, 40/64=0.625, registers.
+# sm_70,64,0,128   : regs/warp=2048; warps held=round_down(32,4)=32; byRegs=32/4=8;
+#                    byWarps=64/4=16 -> 8 blocks, 32 warps, 32/64=0.5, registers.
+# sm_70,32,49152,128: bySmem=98304/round_up(49152,128)=98304/49152=2; byRegs=64/4=16 -> 2 blocks,
+#                    8 warps, 8/64=0.125, shared memory.
+# sm_75,32,0,256   : regs/warp=1024; warps held=64; byRegs=64/8=8; byWarps=32/8=4 -> 4 blocks,
+#                    32 warps, 32/32=1.0, warps.
+# sm_75,96,0,256   : regs/warp=round_up(96*32,256)=3072; warps held=round_down(21,4)=20;
+#                    byRegs=20/8=2; byWarps=4 -> 2 blocks, 16 warps, 16/32=0.5, registers.
+# sm_75,32,32768,256: bySmem=65536/32768=2; byRegs=64/8=8; byWarps=4 -> 2 blocks, 16 warps,
+#                    16/32=0.5, shared memory.
+# sm_80,32,0,256   : regs/warp=1024; warps held=64; byRegs=64/8=8; byWarps=64/8=8; maxBlocks=32
+#                    -> 8 blocks, 64 warps, 64/64=1.0; registers (ties warps, tunable named first).
+# sm_80,64,0,256   : regs/warp=2048; warps held=32; byRegs=32/8=4; byWarps=8 -> 4 blocks,
+#                    32 warps, 32/64=0.5, registers.
+# sm_80,128,0,128  : regs/warp=round_up(128*32,256)=4096; warps held=16; byRegs=16/4=4;
+#                    byWarps=64/4=16 -> 4 blocks, 16 warps, 16/64=0.25, registers.
+# sm_80,32,101376,256: bySmem=167936/round_up(101376+1024,128)=167936/102400=1; byRegs=8
+#                    -> 1 block, 8 warps, 8/64=0.125, shared memory.
+# sm_86,32,0,256   : regs/warp=1024; warps held=64; byRegs=64/8=8; byWarps=48/8=6; maxBlocks=16
+#                    -> 6 blocks, 48 warps, 48/48=1.0, warps.
+# sm_86,64,0,256   : regs/warp=2048; warps held=32; byRegs=32/8=4; byWarps=6 -> 4 blocks,
+#                    32 warps, 32/48=0.6667, registers.
+# sm_89,32,0,128   : regs/warp=1024; warps held=64; byRegs=64/4=16; byWarps=48/4=12; maxBlocks=24
+#                    -> 12 blocks, 48 warps, 48/48=1.0, warps.
+# sm_89,168,99328,256: regs/warp=round_up(168*32,256)=5376; warps held=round_down(12,4)=12;
+#                    byRegs=12/8=1; bySmem=102400/round_up(99328+1024,128)=102400/100352=1
+#                    -> 1 block, 8 warps, 8/48=0.16667; registers (ties shared memory, named first).
+# sm_90,128,0,256  : regs/warp=4096; warps held=16; byRegs=16/8=2; byWarps=64/8=8 -> 2 blocks,
+#                    16 warps, 16/64=0.25, registers.
+# sm_90,255,0,256  : regs/warp=round_up(255*32,256)=8192; warps held=8; byRegs=8/8=1 -> 1 block,
+#                    8 warps, 8/64=0.125, registers.
+# sm_120,32,0,128  : regs/warp=1024; warps held=64; byRegs=64/4=16; byWarps=48/4=12; maxBlocks=24
+#                    -> 12 blocks, 48 warps, 48/48=1.0, warps.
 #
 # columns: arch, regs_per_thread, smem_bytes_per_block, threads_per_block, occupancy, active_warps_per_sm, limiter
 sm_70,48,0,256,0.625,40,registers
 sm_70,64,0,128,0.5,32,registers
+sm_70,32,49152,128,0.125,8,sharedmemory
 sm_75,32,0,256,1.0,32,warps
 sm_75,96,0,256,0.5,16,registers
+sm_75,32,32768,256,0.5,16,sharedmemory
 sm_80,32,0,256,1.0,64,registers
 sm_80,64,0,256,0.5,32,registers
 sm_80,128,0,128,0.25,16,registers

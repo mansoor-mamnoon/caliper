@@ -67,7 +67,14 @@ def test_doubling_registers_halves_occupancy() -> None:
     assert half["theoretical"] == pytest.approx(0.5)
 
 
-def test_unknown_arch_or_out_of_range_returns_none() -> None:
+def test_unknown_arch_returns_none() -> None:
     assert _core.theoretical_occupancy("sm_42", 32, 0, 256) is None
-    assert _core.theoretical_occupancy("sm_80", 32, 0, 0) is None
-    assert _core.theoretical_occupancy("sm_80", 300, 0, 256) is None
+
+
+@pytest.mark.parametrize(
+    ("regs", "block"),
+    [(32, 0), (32, 2048), (300, 256), (0, 256)],
+)
+def test_out_of_range_launch_config_raises(regs: int, block: int) -> None:
+    with pytest.raises(ValueError):
+        _core.theoretical_occupancy("sm_80", regs, 0, block)

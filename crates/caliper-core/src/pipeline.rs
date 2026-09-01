@@ -126,6 +126,12 @@ pub struct ReduceInput {
     /// Total grid blocks of the timed launch, for the occupancy wave count.
     #[serde(default)]
     pub grid_blocks: Option<u32>,
+    /// The driver's `cuOccupancyMaxActiveBlocksPerMultiprocessor` for this
+    /// launch, when a module probe could supply it. When it and the model
+    /// disagree by more than one block the record is flagged
+    /// `occupancy-model-mismatch`; the model's number is what gets recorded.
+    #[serde(default)]
+    pub driver_occupancy_blocks: Option<u32>,
     /// Roofline inputs (dtype + FLOP / HBM-byte counts) for the workload, if
     /// the caller can supply them. Drives the roofline section against the
     /// per-launch median time.
@@ -251,6 +257,7 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
         input.ptxas.as_ref(),
         input.block_size,
         input.grid_blocks,
+        input.driver_occupancy_blocks,
     );
     fill_roofline(&mut record, input.roofline.as_ref(), g.p50);
 
@@ -260,11 +267,16 @@ pub fn reduce(input: ReduceInput) -> Result<Record, PipelineError> {
 /// Populate `record.occupancy` from the CUDA occupancy model, when the static
 /// resource usage, the launch block size, and the architecture are all known.
 /// A no-op otherwise -- occupancy is advisory context.
+///
+/// If a `driver_occupancy_blocks` from the CUDA occupancy API is also supplied
+/// and disagrees with the model by more than one block, the record is flagged
+/// `occupancy-model-mismatch` (the model's number is still what gets recorded).
 fn fill_occupancy(
     record: &mut Record,
     ptxas: Option<&Ptxas>,
     block_size: Option<u32>,
     grid_blocks: Option<u32>,
+    driver_occupancy_blocks: Option<u32>,
 ) {
     let (Some(px), Some(block), Some(arch)) = (ptxas, block_size, record.machine.sm_arch.clone())
     else {
@@ -275,6 +287,17 @@ fn fill_occupancy(
     };
     let smem64 = px.smem_static_bytes.unwrap_or(0) + px.smem_dynamic_bytes.unwrap_or(0);
     let smem = u32::try_from(smem64).unwrap_or(u32::MAX);
+    let Some(est) = crate::occupancy::theoretical_occupancy(&arch, regs, smem, block) else {
+        return;
+    };
+
+    if let Some(driver) = driver_occupancy_blocks {
+        let delta = est.active_blocks_per_sm.abs_diff(driver);
+        if delta > 1 {
+            record.flags.push("occupancy-model-mismatch".to_string());
+        }
+    }
+
     if let Some(occ) = crate::occupancy::occupancy_section(
         &arch,
         regs,
@@ -320,6 +343,7 @@ mod tests {
             ptxas: Some(Ptxas::default()),
             block_size: None,
             grid_blocks: None,
+            driver_occupancy_blocks: None,
             roofline: None,
         }
     }
@@ -460,11 +484,51 @@ mod tests {
     fn reduce_leaves_occupancy_empty_without_launch_geometry() {
         let gpu = vec![6400.0; 40];
         let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
-        let mut input = base_input(gpu, wall);
-        input.machine.sm_arch = Some("sm_89".to_string());
+        let base = base_input(gpu, wall);
+
         // no block_size -> occupancy stays default
-        let rec = reduce(input).unwrap();
-        assert!(rec.occupancy.theoretical.is_none());
+        let mut a = base.clone();
+        a.machine.sm_arch = Some("sm_89".to_string());
+        assert!(reduce(a).unwrap().occupancy.theoretical.is_none());
+
+        // block_size but no arch -> nothing to model against
+        let mut b = base.clone();
+        b.block_size = Some(256);
+        assert!(reduce(b).unwrap().occupancy.theoretical.is_none());
+
+        // arch + block_size but ptxas has no register count
+        let mut c = base;
+        c.machine.sm_arch = Some("sm_89".to_string());
+        c.block_size = Some(256);
+        c.ptxas = Some(Ptxas::default());
+        assert!(reduce(c).unwrap().occupancy.theoretical.is_none());
+    }
+
+    #[test]
+    fn reduce_flags_a_model_vs_driver_occupancy_mismatch() {
+        let gpu = vec![6400.0; 40];
+        let wall: Vec<f64> = gpu.iter().map(|g| g + 320.0).collect();
+        let mut base = base_input(gpu, wall);
+        base.machine.sm_arch = Some("sm_80".to_string());
+        base.ptxas = Some(Ptxas {
+            regs_per_thread: Some(32),
+            ..Ptxas::default()
+        });
+        base.block_size = Some(256); // model: 8 resident blocks on sm_80
+
+        // The driver agrees (within a block) -> no flag.
+        let mut ok = base.clone();
+        ok.driver_occupancy_blocks = Some(8);
+        let r = reduce(ok).unwrap();
+        assert!(!r.flags.contains(&"occupancy-model-mismatch".to_string()));
+        assert!((r.occupancy.theoretical.unwrap() - 1.0).abs() < 1e-9);
+
+        // The driver disagrees by more than one block -> flag, model still wins.
+        let mut bad = base;
+        bad.driver_occupancy_blocks = Some(3);
+        let r = reduce(bad).unwrap();
+        assert!(r.flags.contains(&"occupancy-model-mismatch".to_string()));
+        assert_eq!(r.occupancy.active_warps_per_sm, Some(64));
     }
 
     #[test]

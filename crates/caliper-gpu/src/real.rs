@@ -108,6 +108,15 @@ impl ModuleProbe for CudaModuleProbe {
     fn probe(&mut self, _kernel_key: &str) -> Result<Vec<ParsedKernel>> {
         Err(pending("ptxas / cuobjdump module probe"))
     }
+
+    fn max_active_blocks_per_sm(
+        &mut self,
+        _kernel_key: &str,
+        _block_size: u32,
+        _dynamic_smem_bytes: u32,
+    ) -> Result<Option<u32>> {
+        Err(pending("cuOccupancyMaxActiveBlocksPerMultiprocessor"))
+    }
 }
 
 /// The real ports for one device, bundled so they satisfy
@@ -163,6 +172,16 @@ impl ModuleProbe for CudaDeviceLayer {
     fn probe(&mut self, kernel_key: &str) -> Result<Vec<ParsedKernel>> {
         self.probe.probe(kernel_key)
     }
+
+    fn max_active_blocks_per_sm(
+        &mut self,
+        kernel_key: &str,
+        block_size: u32,
+        dynamic_smem_bytes: u32,
+    ) -> Result<Option<u32>> {
+        self.probe
+            .max_active_blocks_per_sm(kernel_key, block_size, dynamic_smem_bytes)
+    }
 }
 
 #[cfg(test)]
@@ -190,6 +209,12 @@ mod tests {
         ));
         assert!(matches!(
             CudaModuleProbe::open(0).unwrap().probe("k"),
+            Err(GpuError::Unsupported(_))
+        ));
+        assert!(matches!(
+            CudaModuleProbe::open(0)
+                .unwrap()
+                .max_active_blocks_per_sm("k", 256, 0),
             Err(GpuError::Unsupported(_))
         ));
     }

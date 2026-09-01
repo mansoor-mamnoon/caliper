@@ -35,6 +35,16 @@ pub struct RawSamples {
     /// Union of throttle reasons (NVML names) observed while timing.
     #[serde(default)]
     pub throttle_reasons: Vec<String>,
+    /// Threads per block of the timed launch, if the launcher knows it. Drives
+    /// the occupancy section and the driver occupancy-API cross-check.
+    #[serde(default)]
+    pub block_size: Option<u32>,
+    /// Total grid blocks of the timed launch, for the occupancy wave count.
+    #[serde(default)]
+    pub grid_blocks: Option<u32>,
+    /// Dynamic shared memory per block requested at launch (bytes).
+    #[serde(default)]
+    pub dynamic_smem_bytes: Option<u32>,
 }
 
 /// Whether to capture each timed batch into a CUDA graph and replay it, which

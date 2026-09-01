@@ -18,9 +18,18 @@
 //! be substituted as they are measured) a sustained value from `caliper
 //! selftest` on that SKU. Tensor-core figures are **dense** (no 2:4 sparsity).
 //! HBM figures are datasheet peaks; the O2 oracle's sustained bandwidth is the
-//! value to prefer once recorded, with the datasheet kept in the comment.
+//! value to prefer once recorded, with the datasheet kept in the comment. Every
+//! HBM cell is still a datasheet number today (`; measured O2 value pending`) --
+//! the sustained measurements come from `caliper selftest` on each SKU.
 
 use serde::{Deserialize, Serialize};
+
+/// Below this fraction of the roofline ceiling at the workload's arithmetic
+/// intensity, the run is called `latency`-bound rather than compute- or
+/// memory-bound: it is not close enough to either roof for the roofline to be
+/// the explanation (launch overhead, low occupancy, or dependency stalls are).
+/// A quarter of the ceiling is the usual rule-of-thumb cut in roofline write-ups.
+const LATENCY_CEILING_FRACTION: f64 = 0.25;
 
 /// A workload's roofline inputs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -72,7 +81,8 @@ pub struct RooflineResult {
     pub achieved_tflops: f64,
     /// Achieved HBM throughput (GB/s).
     pub achieved_gbps: f64,
-    /// FLOPs per byte of HBM traffic.
+    /// FLOPs per byte of HBM traffic. `f64::INFINITY` when `bytes_hbm` is 0
+    /// (`roofline_section` maps that to `None`).
     pub arithmetic_intensity: f64,
     /// Arithmetic intensity at the roofline knee, if peaks are known.
     pub ridge_point: Option<f64>,
@@ -243,7 +253,7 @@ pub fn analyze(arch: &str, spec: &RooflineSpec, seconds: f64) -> RooflineResult 
             } else {
                 0.0
             };
-            let bound = if attained < 0.25 {
+            let bound = if attained < LATENCY_CEILING_FRACTION {
                 Bound::Latency
             } else if arithmetic_intensity >= ridge {
                 Bound::Compute
@@ -278,20 +288,32 @@ pub fn analyze(arch: &str, spec: &RooflineSpec, seconds: f64) -> RooflineResult 
     }
 }
 
-/// Build a [`schema::Roofline`] section from an [`analyze`] result.
+/// The largest `roofline_pct` a record may carry (`schema::validate` rejects
+/// anything above this). Boost-clock spread over the datasheet peak lands a
+/// healthy measurement a little over 1.0; a value past 1.5 means the caller's
+/// FLOP/byte counts are wrong, and the section clamps rather than emit a record
+/// that fails validation.
+const MAX_RECORDED_ROOFLINE_PCT: f64 = 1.5;
+
+/// Build a [`schema::Roofline`] section from an [`analyze`] result. Non-finite
+/// numbers are dropped and `roofline_pct` is clamped to the range
+/// `schema::validate` accepts, so the section can always go into a valid record.
 ///
 /// [`schema::Roofline`]: crate::schema::Roofline
 #[must_use]
 pub fn roofline_section(r: &RooflineResult) -> crate::schema::Roofline {
+    fn finite(x: f64) -> Option<f64> {
+        x.is_finite().then_some(x)
+    }
     crate::schema::Roofline {
-        achieved_tflops: Some(r.achieved_tflops),
-        roofline_pct: r.roofline_pct,
-        achieved_gbps: Some(r.achieved_gbps),
-        arithmetic_intensity: r
-            .arithmetic_intensity
-            .is_finite()
-            .then_some(r.arithmetic_intensity),
-        ridge_point: r.ridge_point,
+        achieved_tflops: finite(r.achieved_tflops),
+        roofline_pct: r
+            .roofline_pct
+            .and_then(finite)
+            .map(|p| p.clamp(0.0, MAX_RECORDED_ROOFLINE_PCT)),
+        achieved_gbps: finite(r.achieved_gbps),
+        arithmetic_intensity: finite(r.arithmetic_intensity),
+        ridge_point: r.ridge_point.and_then(finite),
         bound: Some(r.bound.as_str().to_string()),
         baseline_pct: None,
         baseline: None,
@@ -323,13 +345,28 @@ mod tests {
             assert!(peak_hbm_gbps(arch).is_some(), "{arch} HBM");
             assert!(peak_fp32_fma_tflops(arch).is_some(), "{arch} FP32");
         }
-        // The source citations live next to the numbers; spot-check that the
-        // table module actually carries a citation per peaks cell.
+        // FR-9: "every peaks-table cell has a cited source in code." Check it
+        // per cell -- every `=> <number>,` match arm in this module must carry a
+        // `source:` comment on the same line.
         let src = include_str!("roofline.rs");
-        let cells = src.matches("source:").count();
+        let mut cells = 0;
+        let mut uncited = Vec::new();
+        for line in src.lines() {
+            let Some((_, rhs)) = line.trim().split_once("=> ") else {
+                continue;
+            };
+            if !rhs.starts_with(|c: char| c.is_ascii_digit()) {
+                continue; // `_ => return None`, `=> "fp32"`, etc.
+            }
+            cells += 1;
+            if !line.contains("source:") {
+                uncited.push(line.trim().to_string());
+            }
+        }
+        assert!(cells >= 30, "peaks table shrank to {cells} cells");
         assert!(
-            cells >= 24,
-            "expected a source comment per peaks cell, found {cells}"
+            uncited.is_empty(),
+            "peaks-table cells with no source: {uncited:#?}"
         );
     }
 
