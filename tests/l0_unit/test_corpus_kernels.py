@@ -16,11 +16,20 @@ from typing import Any
 import pytest
 
 from caliper.corpus import _common
-from caliper.corpus.kernels import gemm, rmsnorm, softmax
+from caliper.corpus.kernels import attention_bwd, attention_fwd, gemm, rmsnorm, softmax
 
 pytestmark = pytest.mark.l0
 
-KERNELS = [gemm, rmsnorm, softmax]
+KERNELS = [gemm, rmsnorm, softmax, attention_fwd, attention_bwd]
+ATTENTION = [attention_fwd, attention_bwd]
+
+
+def _shape_for(mod: Any) -> dict[str, int]:
+    if mod is gemm:
+        return {"M": 16, "N": 16, "K": 16}
+    if mod in ATTENTION:
+        return {"B": 1, "H": 4, "S": 16, "D": 16}
+    return {"ROWS": 16, "COLS": 16}
 
 
 # -- _common ------------------------------------------------------------------
@@ -72,9 +81,14 @@ def test_kernel_source_hash_is_sha256_of_its_own_file(mod: Any) -> None:
 
 @pytest.mark.parametrize("mod", KERNELS)
 def test_run_raises_cleanly_without_live_deps(mod: Any) -> None:
-    shape = {"M": 16, "N": 16, "K": 16} if mod is gemm else {"ROWS": 16, "COLS": 16}
     with pytest.raises(NotImplementedError, match="run"):
-        mod.run({"shape": shape, "dtype": "bf16", "layout": "row"})
+        mod.run({"shape": _shape_for(mod), "dtype": "bf16", "layout": "row"})
+
+
+@pytest.mark.parametrize("mod", ATTENTION)
+def test_attention_check_numerics_raises_cleanly_without_live_deps(mod: Any) -> None:
+    with pytest.raises(NotImplementedError, match="run"):
+        mod.check_numerics({"shape": _shape_for(mod), "dtype": "bf16"})
 
 
 # -- roofline_spec: pure math, hand-computable -----------------------------
@@ -104,6 +118,31 @@ def test_elementwise_roofline_spec_matches_hand_computed_flops_and_bytes(
 @pytest.mark.parametrize("mod", [rmsnorm, softmax])
 def test_elementwise_roofline_spec_is_none_for_a_missing_dimension(mod: Any) -> None:
     assert mod.roofline_spec({"ROWS": 256}, "bf16") is None
+
+
+def test_attention_fwd_roofline_spec_is_two_matmuls_and_io_aware_bytes() -> None:
+    b, h, s, d = 2, 16, 2048, 128
+    spec = attention_fwd.roofline_spec({"B": b, "H": h, "S": s, "D": d}, "bf16")
+    assert spec is not None
+    assert spec["flops"] == pytest.approx(4 * b * h * s * s * d)
+    assert spec["bytes_hbm"] == pytest.approx(4 * b * h * s * d * 2)  # Q,K,V in + O out
+
+
+def test_attention_causal_halves_flops_and_bwd_is_2_5x() -> None:
+    dims = {"B": 1, "H": 8, "S": 1024, "D": 64}
+    dense = attention_fwd.roofline_spec(dims, "bf16")
+    causal = attention_fwd.roofline_spec({**dims, "causal": True}, "bf16")
+    bwd = attention_bwd.roofline_spec(dims, "bf16")
+    assert dense is not None and causal is not None and bwd is not None
+    assert causal["flops"] == pytest.approx(dense["flops"] / 2)
+    assert causal["bytes_hbm"] == pytest.approx(dense["bytes_hbm"])
+    assert bwd["flops"] == pytest.approx(2.5 * dense["flops"])
+    assert bwd["bytes_hbm"] == pytest.approx(2 * dense["bytes_hbm"])
+
+
+@pytest.mark.parametrize("mod", ATTENTION)
+def test_attention_roofline_spec_is_none_for_a_missing_dimension(mod: Any) -> None:
+    assert mod.roofline_spec({"B": 1, "H": 8, "S": 1024}, "bf16") is None
 
 
 # -- assemble_result: the "valid row" half of the DoD, off-device ----------
