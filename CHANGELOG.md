@@ -240,3 +240,19 @@ tagged release onward.
   dtype_bytes` HBM traffic for both (read the input, write the output).
   `corpus:rmsnorm` and `corpus:softmax` are added as reference targets
   alongside `corpus:gemm`.
+- `corpus.kernels.attention_fwd` / `attention_bwd` -- FlashAttention-style
+  forward and backward Triton kernels plus their
+  `F.scaled_dot_product_attention` baselines, completing the FR-14 corpus.
+  Forward: online-softmax running max/sum, causal mask, grouped-query
+  attention (`h_kv` < `h`), head dim 64/128, bf16/fp16/fp32 (fp8 raises
+  `NotImplementedError`). Backward: a `delta = rowsum(dO*O)` preprocess
+  kernel, then one K/V block per program accumulating `dK`/`dV` with `dQ`
+  via atomics into an fp32 scratch; GQA by expand-then-group-reduce. Each
+  module exposes `check_numerics(cell)` returning an `allclose` verdict
+  against the baseline (the DoD's correctness gate). `roofline::corpus_spec`
+  gains an `attention` arm (needs `B`/`H`/`S`/`D`, optional `causal`):
+  `4*B*H*S*S*D` FLOPs for the two matmuls (softmax omitted, <2%), halved for
+  `causal`, `2.5x` for the backward; IO-aware `bytes_hbm` of `4*` (fwd) or
+  `8*` (bwd) `B*H*S*D*dtype_bytes`. `corpus:attention_fwd` /
+  `corpus:attention_bwd` added as reference targets. `assemble_result()` now
+  takes the machine fingerprint as an argument (pure, off-device testable).

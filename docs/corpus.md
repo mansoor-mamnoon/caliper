@@ -1,17 +1,21 @@
 # The reference kernel corpus
 
 `python/caliper/corpus/kernels/` pairs a Triton implementation with a vendor
-baseline for a handful of workloads every kernel author recognizes: `gemm`,
-`rmsnorm`, `softmax` today (`attention_fwd` / `attention_bwd` land later). Each
-one is a `corpus:` target on its own — `corpus:gemm`, `corpus:rmsnorm`,
-`corpus:softmax`.
+baseline for the workloads every kernel author recognizes: `gemm`, `rmsnorm`,
+`softmax`, `attention_fwd`, `attention_bwd` — the FR-14 reference corpus. Each
+one is a `corpus:` target on its own (`corpus:gemm`, `corpus:rmsnorm`,
+`corpus:softmax`, `corpus:attention_fwd`, `corpus:attention_bwd`).
 
-`corpus:gemm` also plugs into `sweep()` (its `{M, N, K}` shape is one the sweep
-spec grammar already understands, and its autotune configs feed the config
-cache). `rmsnorm` and `softmax` are `{ROWS, COLS}` workloads, which the spec
-grammar doesn't model yet, so today they run only through a direct
-`kernel.run(cell, config)` call; wiring them into `sweep()` waits on an
-elementwise shape kind in `crates/caliper-core/src/spec.rs`.
+`corpus:gemm` and the two `attention` kernels plug into `sweep()` — their
+shapes (`{M, N, K}` and `{B, H, S, D}`) are ones the sweep spec grammar
+already understands (`parse_inline_shape` in
+`crates/caliper-core/src/spec.rs`), and gemm's autotune configs feed the
+config cache. A sweep of `attention` covers plain non-causal multi-head only,
+though: the `causal` / `h_kv` knobs aren't in the cell schema, so those
+variants run through a direct `kernel.run(cell, config)` call (pass `causal` /
+`h_kv` on the cell dict). `rmsnorm` and `softmax` are `{ROWS, COLS}`
+workloads, which the spec grammar doesn't model yet, so they too run only
+through `kernel.run(...)` for now.
 
 ## How a corpus kernel actually runs
 
@@ -21,8 +25,8 @@ device layer: `CudaLauncher`, `NvmlClock`, and the rest of
 from recorded fixtures today; the real CUDA/NVML bindings are Colab work).
 
 The corpus kernels don't wait on that. They're Triton, which means Python, a
-CUDA device, and nothing else — so `caliper.corpus.kernels.gemm.run()` (and
-`rmsnorm`, `softmax`) time themselves directly with
+CUDA device, and nothing else — so every `kernel.run()` in
+`caliper.corpus.kernels` times itself directly with
 [`caliper.live_timing_ms`](../python/caliper/api.py), the same CUDA-event loop
 `do_bench()` uses: a handful of warm-up launches, an L2-flushing buffer zeroed
 between reps, and a `torch.cuda.Event` pair around every timed launch. So the
@@ -101,6 +105,55 @@ common practice) — `flops = 5*ROWS*COLS`; `bytes_hbm = 2*ROWS*COLS *
 dtype_bytes`, the same read-`x`-write-`y` accounting as `rmsnorm`. Memory-bound
 at any realistic shape.
 
+## `attention_fwd` — `corpus:attention_fwd`
+
+Scaled-dot-product attention, forward. One Triton program per `(batch, head,
+query block)`: it streams the K/V blocks and keeps the softmax normalizer with
+an online running max / sum (the FlashAttention-2 shape — this kernel follows
+that structure, it is not copied from any upstream file). A `causal` flag
+skips the K/V blocks above the diagonal; grouped-query attention (`h_kv` < `h`)
+is handled by mapping each query head to `off_h // (h / h_kv)` for the K/V
+read. Head dim 64 or 128; `bf16` / `fp16` / `fp32` (an `fp8` path for L4 is a
+follow-up — `run()` raises `NotImplementedError` for it rather than silently
+downcasting).
+
+Baseline: `F.scaled_dot_product_attention`, with K/V expanded to the query
+head count so it works on any PyTorch version.
+
+Correctness: `attention_fwd.check_numerics(cell)` runs the kernel and the SDPA
+baseline once (untimed) and returns `{max_abs_err, max_rel_err, allclose}`
+(tolerance `2e-2` for bf16/fp16, `3e-3` for fp32) — the DoD's `allclose`
+gate.
+
+Roofline (`corpus_spec`'s `attention` arm): the two `S×S×D` matmuls (`QKᵀ` and
+`P@V`) dominate at `flops = 4*B*H*S*S*D`; the softmax is under 2 % and is
+omitted. `causal` halves it (lower triangle). HBM traffic is IO-aware —
+`O(S)`, not `O(S²)` — `bytes_hbm = 4*B*H*S*D*dtype_bytes` (stream Q/K/V in,
+O out). GQA's smaller K/V footprint isn't modelled (a slight overcount).
+Compute-bound at any realistic shape.
+
+## `attention_bwd` — `corpus:attention_bwd`
+
+The backward pass. A small preprocess kernel forms `delta = rowsum(dO * O)`;
+the main kernel takes one K/V block per program, sweeps the query blocks,
+accumulates `dK` / `dV` in registers, and adds into `dQ` with `tl.atomic_add`
+(`dQ` is an `fp32` scratch buffer, cast down on return). `causal` and head dim
+64/128 as above; grouped-query attention is handled by expanding K/V to `h`
+heads for the kernel and summing each group's `dK` / `dV` back down to `h_kv`
+afterward.
+
+Baseline: a full SDPA forward+backward through autograd — which is what
+"SDPA-backward" means, so the kernel's timing (backward only, given
+`Q,K,V,O,LSE,dO`) is not directly comparable to the baseline's; `baseline_pct`
+reflects that.
+
+Correctness: `attention_bwd.check_numerics(cell)` compares `dQ` / `dK` / `dV`
+against autograd (tolerance `3e-2` for bf16/fp16, `3e-3` for fp32).
+
+Roofline: the same `attention` arm with the `bwd` sub-case — `flops = 2.5 ×`
+the forward (FlashAttention-2), `bytes_hbm = 8*B*H*S*D*dtype_bytes` (also
+reads `O` and `dO`, writes `dQ` / `dK` / `dV`).
+
 ## Running the corpus
 
 Needs `pip install 'caliper-gpu[triton]'` (installs `torch` + `triton`) and a
@@ -108,11 +161,15 @@ CUDA device — none of this runs on the Mac this library is developed on;
 verify on a Colab GPU runtime:
 
 ```python
-from caliper.corpus.kernels import gemm
+from caliper.corpus.kernels import attention_fwd, gemm
 
 result = gemm.run({"shape": {"m": 4096, "n": 4096, "k": 4096}, "dtype": "bf16", "layout": "row"})
 print(result.validate())          # [] if the record is well-formed
 print(result.roofline.roofline_pct, result.roofline.baseline_pct)
+
+cell = {"shape": {"B": 4, "H": 32, "S": 4096, "D": 128}, "dtype": "bf16", "causal": True}
+print(attention_fwd.check_numerics(cell))   # {'max_abs_err': ..., 'allclose': True}
+print(attention_fwd.run(cell).validate())
 ```
 
 Or through a sweep, which is what exercises `gemm`'s autotune cache end to
