@@ -335,6 +335,32 @@ fn fingerprint_is_complete(machine_json: &str) -> PyResult<bool> {
     Ok(caliper_core::fingerprint::is_complete(&m))
 }
 
+// --- autotune cache key ------------------------------------------------
+
+/// The autotune-config cache key for a `(machine, kernel source hash, config)`
+/// triple: a stable string an `AutotuneCache` keys on. Raises ``ValueError``
+/// on a malformed machine or config JSON.
+#[pyfunction]
+fn autotune_key(
+    machine_json: &str,
+    kernel_source_hash: &str,
+    config_json: &str,
+) -> PyResult<String> {
+    let machine: schema::Machine = serde_json::from_str(machine_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid machine: {e}")))?;
+    let key = caliper_core::autotune::AutotuneKey::build(&machine, kernel_source_hash, config_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid config: {e}")))?;
+    Ok(key.to_key())
+}
+
+/// Canonical JSON (object keys sorted, no whitespace) of a config. Raises
+/// ``ValueError`` on invalid JSON.
+#[pyfunction]
+fn autotune_config_canonical(config_json: &str) -> PyResult<String> {
+    caliper_core::autotune::canonical_json(config_json)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 // --- sweep spec ---------------------------------------------------------
 
 /// Validate a `sweep` spec (as JSON -- the Python layer converts the YAML) and
@@ -502,6 +528,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint_from_env, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_check, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_is_complete, module)?)?;
+    module.add_function(wrap_pyfunction!(autotune_key, module)?)?;
+    module.add_function(wrap_pyfunction!(autotune_config_canonical, module)?)?;
     module.add_function(wrap_pyfunction!(expand_spec, module)?)?;
     module.add_function(wrap_pyfunction!(spec_pending, module)?)?;
     module.add_function(wrap_pyfunction!(spec_cell_keys, module)?)?;

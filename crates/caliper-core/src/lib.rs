@@ -8,6 +8,7 @@
 //! pipeline, the roofline model, `ptxas` parsing, the regression threshold
 //! model, sweep-spec expansion) lands here module by module.
 
+pub mod autotune;
 pub mod doctor;
 pub mod fingerprint;
 pub mod graph;
@@ -23,6 +24,7 @@ pub mod spec;
 pub mod stats;
 pub mod warmup;
 
+pub use autotune::{canonical_json, AutotuneKey};
 pub use doctor::{assess, DoctorFacts, DoctorReport};
 pub use fingerprint::{
     assert_complete as assert_fingerprint_complete, check as check_fingerprint, FingerprintCheck,
