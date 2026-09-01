@@ -1,0 +1,15 @@
+schema_version: 1
+target: corpus:gemm
+dtypes:   [bf16, fp16, fp8_e4m3]
+layouts:  [row, col]
+shapes:   llm-7b
+bench:
+  warmup: auto
+  min_samples: 200
+  flush_l2: true
+  lock_clocks: true
+  cuda_graph: auto
+autotune: from_kernel
+output:
+  parquet: results/gemm-sweep.parquet
+  resume: true

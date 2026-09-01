@@ -335,6 +335,30 @@ fn fingerprint_is_complete(machine_json: &str) -> PyResult<bool> {
     Ok(caliper_core::fingerprint::is_complete(&m))
 }
 
+// --- sweep spec ---------------------------------------------------------
+
+/// Validate a `sweep` spec (as JSON -- the Python layer converts the YAML) and
+/// return the expanded, deduplicated cell list as a JSON array. Raises
+/// ``ValueError`` with a typed message on any malformed field.
+#[pyfunction]
+fn expand_spec(spec_json: &str) -> PyResult<String> {
+    let cells =
+        caliper_core::spec::expand(spec_json).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(serde_json::to_string(&cells).expect("Vec<Cell> serialises"))
+}
+
+/// Given the JSON cell list and a JSON array of completed cell keys, return the
+/// cells still to run (`--resume`). Raises ``ValueError`` on malformed input.
+#[pyfunction]
+fn spec_pending(cells_json: &str, done_keys_json: &str) -> PyResult<String> {
+    let cells: Vec<caliper_core::spec::Cell> = serde_json::from_str(cells_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid cells: {e}")))?;
+    let done: Vec<String> = serde_json::from_str(done_keys_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid done keys: {e}")))?;
+    let left = caliper_core::spec::pending(&cells, &done);
+    Ok(serde_json::to_string(&left).expect("Vec<Cell> serialises"))
+}
+
 // --- shape libraries ------------------------------------------------------
 
 /// The concrete shape list for a named library (`"square-pow2"`, `"prime-odd"`,
@@ -469,6 +493,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint_from_env, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_check, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_is_complete, module)?)?;
+    module.add_function(wrap_pyfunction!(expand_spec, module)?)?;
+    module.add_function(wrap_pyfunction!(spec_pending, module)?)?;
     module.add_function(wrap_pyfunction!(resolve_shape_library, module)?)?;
     module.add_function(wrap_pyfunction!(shape_library_names, module)?)?;
     module.add_function(wrap_pyfunction!(selftest_from_env, module)?)?;

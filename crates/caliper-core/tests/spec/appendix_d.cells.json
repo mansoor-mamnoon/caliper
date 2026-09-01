@@ -1,0 +1,650 @@
+[
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "bf16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp16",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "row",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 512,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 11008,
+   "k": 4096
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ },
+ {
+  "target": "corpus:gemm",
+  "dtype": "fp8_e4m3",
+  "layout": "col",
+  "shape": {
+   "kind": "gemm",
+   "m": 2048,
+   "n": 4096,
+   "k": 11008
+  },
+  "bench": {
+   "warmup": "auto",
+   "min_samples": 200,
+   "flush_l2": true,
+   "lock_clocks": true,
+   "cuda_graph": "auto"
+  }
+ }
+]
