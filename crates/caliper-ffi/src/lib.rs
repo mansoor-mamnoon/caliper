@@ -335,6 +335,60 @@ fn fingerprint_is_complete(machine_json: &str) -> PyResult<bool> {
     Ok(caliper_core::fingerprint::is_complete(&m))
 }
 
+// --- selftest --------------------------------------------------------------
+
+/// Run `caliper selftest` against the `CALIPER_GPU_PORTS` backend and return
+/// the Appendix-E report as JSON. With no device this is the `ERROR` /
+/// no-device report (exit 2). `full` toggles the O5 + `nsys` cross-checks; the
+/// on-device oracle runner itself lands on a CUDA host.
+#[pyfunction]
+fn selftest_from_env(full: bool) -> String {
+    use caliper_core::selftest::{SelftestCheck, SelftestReport, CHECK_NAMES};
+
+    // A usable device means `snapshot()` succeeds. Without one (no `cuda`
+    // build, no GPU) fall to the no-device report -- matches `doctor` /
+    // `fingerprint`.
+    let machine = match caliper_gpu::open_from_env().and_then(|mut h| h.snapshot()) {
+        Ok(m) => m,
+        Err(_) => return SelftestReport::no_device().to_json(),
+    };
+
+    let mut checks = vec![SelftestCheck::pass(
+        "device_present",
+        "a CUDA device is present",
+    )];
+    for name in CHECK_NAMES {
+        if !full && (*name == "o5_cublas_gemm" || *name == "vs_nsys") {
+            continue;
+        }
+        checks.push(SelftestCheck::skip(
+            name,
+            "on-device oracle runner runs on a CUDA host",
+        ));
+    }
+    SelftestReport::assemble(machine, checks).to_json()
+}
+
+/// Assemble a selftest report from a machine document and a JSON array of
+/// check objects. Raises ``ValueError`` on malformed input.
+#[pyfunction]
+fn selftest_assemble(machine_json: &str, checks_json: &str) -> PyResult<String> {
+    let machine: schema::Machine = serde_json::from_str(machine_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid machine: {e}")))?;
+    let checks: Vec<caliper_core::selftest::SelftestCheck> = serde_json::from_str(checks_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid checks: {e}")))?;
+    Ok(caliper_core::selftest::SelftestReport::assemble(machine, checks).to_json())
+}
+
+/// Structural validation of a selftest report document. Returns a list of
+/// problems (empty if well-formed). Raises ``ValueError`` on a parse error.
+#[pyfunction]
+fn validate_selftest_json(text: &str) -> PyResult<Vec<String>> {
+    let report: caliper_core::selftest::SelftestReport =
+        serde_json::from_str(text).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(report.validate())
+}
+
 /// The CUDA toolchain version in `nvcc --version` output, e.g. `"12.4.131"`, or
 /// `None` if the text carries no recognisable version.
 #[pyfunction]
@@ -379,6 +433,9 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint_from_env, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_check, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_is_complete, module)?)?;
+    module.add_function(wrap_pyfunction!(selftest_from_env, module)?)?;
+    module.add_function(wrap_pyfunction!(selftest_assemble, module)?)?;
+    module.add_function(wrap_pyfunction!(validate_selftest_json, module)?)?;
     module.add_function(wrap_pyfunction!(parse_nvcc_version, module)?)?;
     module.add_function(wrap_pyfunction!(parse_ptxas_version, module)?)?;
     Ok(())

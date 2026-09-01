@@ -300,6 +300,60 @@ pub fn check_o6_throttle(invalidated_samples: u64, throttle_reasons: &[String]) 
     )
 }
 
+// --- O7: calibration GEMM (community-submission trust gate) ------------------
+
+/// The locked-clock `p50` (microseconds) of the fixed `calibration_gemm`
+/// (2048^3 bf16) for a SKU. `None` for a SKU not yet in the checked-in table.
+///
+/// The table is seeded and grows as each SKU is measured on locked clocks at
+/// acceptance time.
+#[must_use]
+pub fn calibration_gemm_p50_us(arch: &str) -> Option<f64> {
+    let tag: String = arch
+        .trim()
+        .to_ascii_lowercase()
+        .strip_prefix("sm_")
+        .unwrap_or("")
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    match tag.as_str() {
+        // source: Colab A100-40GB, clocks locked, calibration_gemm 2048^3 bf16
+        // -- provisional seed from the plan's selftest example; replaced with
+        // the measured value at Week-2 acceptance.
+        "80" => Some(1790.0),
+        _ => None,
+    }
+}
+
+/// Check O7: on locked clocks the calibration GEMM's `p50` is within 8% of the
+/// SKU's table value (Appendix: +-8% -> `verified`, else `clocks-suspect`).
+/// A SKU not in the table cannot be checked -- the caller should skip it.
+#[must_use]
+pub fn check_o7_calibration_gemm(measured_p50_us: f64, arch: &str) -> OracleCheck {
+    match calibration_gemm_p50_us(arch) {
+        Some(reference) => {
+            let check =
+                OracleCheck::within("o7_calibration_gemm", measured_p50_us, reference, 0.08);
+            let verdict = if check.passed {
+                "verified"
+            } else {
+                "clocks-suspect"
+            };
+            OracleCheck {
+                detail: format!("{} -> {verdict}", check.detail),
+                ..check
+            }
+        }
+        None => OracleCheck::boolean(
+            "o7_calibration_gemm",
+            false,
+            measured_p50_us,
+            format!("no calibration_gemm table entry for {arch:?}"),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,5 +445,24 @@ mod tests {
         assert!(!check_o6_throttle(0, &["SW_POWER_CAP".to_string()]).passed); // nothing dropped
         assert!(!check_o6_throttle(10, &[]).passed); // no reason
         assert!(!check_o6_throttle(10, &["GpuIdle".to_string()]).passed); // benign reason
+    }
+
+    #[test]
+    fn o7_calibration_gemm_is_within_eight_percent_of_the_sku_table() {
+        assert_eq!(calibration_gemm_p50_us("sm_80"), Some(1790.0));
+        assert_eq!(calibration_gemm_p50_us("sm_90"), None);
+
+        let ok = check_o7_calibration_gemm(1850.0, "sm_80"); // +3.4%
+        assert!(ok.passed);
+        assert!(ok.detail.contains("verified"));
+
+        let bad = check_o7_calibration_gemm(2100.0, "sm_80"); // +17%
+        assert!(!bad.passed);
+        assert!(bad.detail.contains("clocks-suspect"));
+
+        // a SKU with no table entry cannot pass
+        let unknown = check_o7_calibration_gemm(1800.0, "sm_120");
+        assert!(!unknown.passed);
+        assert!(unknown.detail.contains("no calibration_gemm table entry"));
     }
 }

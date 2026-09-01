@@ -53,6 +53,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="report completeness instead; exit 1 if a required field is missing",
     )
 
+    p_st = sub.add_parser("selftest", help="run the oracle suite and report")
+    p_st.add_argument(
+        "--full",
+        action="store_true",
+        help="also run O5 (cuBLAS) and the nsys cross-check",
+    )
+    p_st.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -146,6 +154,19 @@ def _cmd_fingerprint(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_selftest(args: argparse.Namespace) -> int:
+    report = api.selftest(full=args.full)
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(f"caliper selftest: {report['result']}  (coverage: {report['coverage']})")
+        for check in report["checks"]:
+            print(f"  {check['status']:5}  {check['name']:24} {check['detail']}")
+        if report["not_validated"]:
+            print(f"  not validated here: {', '.join(report['not_validated'])}")
+    return int(report["exit_code"])
+
+
 def _recording_text(args: argparse.Namespace) -> str | None:
     return Path(args.recording).read_text() if args.recording else None
 
@@ -164,6 +185,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_doctor(args)
     if args.command == "fingerprint":
         return _cmd_fingerprint(args)
+    if args.command == "selftest":
+        return _cmd_selftest(args)
     parser.print_help(sys.stderr)  # pragma: no cover - argparse rejects unknowns first
     return 2
 

@@ -17,6 +17,7 @@ pub mod pipeline;
 pub mod ptxas_parse;
 pub mod roofline;
 pub mod schema;
+pub mod selftest;
 pub mod stats;
 pub mod warmup;
 
@@ -37,5 +38,6 @@ pub use roofline::{
     peak_fp32_fma_tflops, peak_hbm_gbps, peak_tensor_tflops, Bound, RooflineResult, RooflineSpec,
 };
 pub use schema::{Record, SCHEMA_VERSION};
+pub use selftest::{CheckStatus, Coverage, Outcome, SelftestCheck, SelftestReport};
 pub use stats::{cross_pass_cov, summarize, Summary};
 pub use warmup::{steady_state, Warmup, WarmupOpts, WarmupPlan};

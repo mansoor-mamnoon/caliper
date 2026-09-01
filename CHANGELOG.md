@@ -152,3 +152,20 @@ tagged release onward.
   (`DEFAULT_SINGLE_LAUNCH_THRESHOLD_US`). `bench` records the outcome as a
   `graph-captured` / `graph-eager` flag, from the launcher's own report
   (`RawSamples.graph_used` / `single_launch_us`) or the policy.
+- `caliper_core::selftest` + `caliper selftest [--full] [--json]` -- the
+  Appendix-E oracle self-test report: `SelftestReport::assemble` folds the O1-O7
+  / reproducibility / (`--full`) O5 + `nsys` checks into a `PASS` / `FAIL` /
+  `ERROR` (a suite that validated nothing is an `ERROR`), a `full` / `reduced`
+  coverage, and a `not_validated` list. `validate()` re-derives those fields and
+  flags a tampered report. Exit codes 0 / 1 / 2; with no device the CLI emits
+  the `no_device` `ERROR` report. Exposed as `caliper.selftest()` and
+  `caliper._core.{selftest_from_env, selftest_assemble, validate_selftest_json}`.
+  The on-device oracle runner (real `bench()` -> the checks) lands on a CUDA
+  host.
+- `caliper_core::oracles` gains O7: `check_o7_calibration_gemm` compares a
+  locked-clock calibration-GEMM `p50` against a per-SKU table
+  (`calibration_gemm_p50_us`, seeded for `sm_80`) within +-8%
+  (`verified` / `clocks-suspect`).
+- `notebooks/selftest.ipynb` (runs `caliper selftest --full`, saves and
+  validates the report) and a finalized `notebooks/dev.ipynb`; `CONTRIBUTING.md`
+  documents the push -> Colab -> PR loop.

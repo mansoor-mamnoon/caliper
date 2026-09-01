@@ -138,3 +138,16 @@ def test_fingerprint_check_on_a_complete_recording(capsys: pytest.CaptureFixture
     report = json.loads(capsys.readouterr().out)
     assert report["complete"] is True
     assert report["missing_required"] == []
+
+
+def test_selftest_without_a_gpu_is_an_error_report(capsys: pytest.CaptureFixture[str]) -> None:
+    from caliper import _core
+
+    code = main(["selftest", "--full", "--json"])
+    assert code == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["result"] == "ERROR"
+    assert report["coverage"] == "reduced"
+    assert "vs_nsys" in report["not_validated"]
+    assert report.pop("exit_code") == 2
+    assert _core.validate_selftest_json(json.dumps(report)) == []
