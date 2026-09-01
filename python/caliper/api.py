@@ -25,6 +25,7 @@ __all__ = [
     "doctor_text",
     "fingerprint",
     "fingerprint_check",
+    "live_timing_ms",
     "selftest",
     "sweep",
     "toolchain",
@@ -157,28 +158,38 @@ def _reduce_times_ms(
     }[return_mode]
 
 
-def _do_bench_live(
-    fn: Any,
-    warmup_ms: float,
-    rep_ms: float,
-    grad_to_none: Any,
-    quantiles: list[float] | None,
-    return_mode: str,
-) -> float | list[float]:
-    """Time a live callable with CUDA events, à la ``triton.testing.do_bench``.
-    Needs PyTorch + a CUDA device; raises ``NotImplementedError`` otherwise."""
+def _check_live_deps(caller: str) -> None:
+    """Raise ``NotImplementedError`` unless PyTorch + a CUDA device are
+    available -- the shared degrade-honestly check for every live-callable
+    timing path (``do_bench``, the corpus kernels)."""
     try:
         import torch
     except ImportError as exc:  # pragma: no cover - torch not installed on the dev box
         raise NotImplementedError(
-            "caliper.do_bench() on a live callable needs PyTorch with CUDA. Pass "
-            "fixture=<path> or recording=<text> for the no-GPU path."
+            f"{caller} needs PyTorch with CUDA. Pass fixture=<path> or "
+            "recording=<text> for the no-GPU path."
         ) from exc
     if not torch.cuda.is_available():  # pragma: no cover - no CUDA on the dev box
         raise NotImplementedError(
-            "caliper.do_bench() on a live callable needs a CUDA device. Pass "
-            "fixture=<path> or recording=<text> for the no-GPU path."
+            f"{caller} needs a CUDA device. Pass fixture=<path> or recording=<text> "
+            "for the no-GPU path."
         )
+
+
+def live_timing_ms(
+    fn: Any,
+    warmup: float = 25,
+    rep: float = 100,
+    grad_to_none: Any = None,
+) -> list[float]:
+    """Time a live callable with CUDA events, à la ``triton.testing.do_bench``,
+    and return every per-rep sample in milliseconds (raw, unreduced).
+
+    Needs PyTorch + a CUDA device; raises ``NotImplementedError`` otherwise.
+    ``warmup`` / ``rep`` are millisecond budgets, matching Triton's `do_bench`.
+    """
+    _check_live_deps("caliper.live_timing_ms()")
+    import torch
 
     # pragma: no cover below - exercised on a CUDA host (playbook #10), not in CI
     fn()
@@ -195,8 +206,8 @@ def _do_bench_live(
     torch.cuda.synchronize()
     estimate_ms = max(start.elapsed_time(end) / 5.0, 1e-6)
 
-    n_warmup = max(1, int(warmup_ms / estimate_ms))
-    n_repeat = max(1, int(rep_ms / estimate_ms))
+    n_warmup = max(1, int(warmup / estimate_ms))
+    n_repeat = max(1, int(rep / estimate_ms))
     starts = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
     ends = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
     for _ in range(n_warmup):
@@ -210,7 +221,18 @@ def _do_bench_live(
         fn()
         ends[i].record()
     torch.cuda.synchronize()
-    times_ms = [s.elapsed_time(e) for s, e in zip(starts, ends, strict=True)]
+    return [s.elapsed_time(e) for s, e in zip(starts, ends, strict=True)]
+
+
+def _do_bench_live(
+    fn: Any,
+    warmup_ms: float,
+    rep_ms: float,
+    grad_to_none: Any,
+    quantiles: list[float] | None,
+    return_mode: str,
+) -> float | list[float]:
+    times_ms = live_timing_ms(fn, warmup_ms, rep_ms, grad_to_none)
     return _reduce_times_ms(times_ms, quantiles, return_mode)
 
 
