@@ -32,7 +32,10 @@ class AutotuneCache:
         self._hits = 0
         self._misses = 0
         if self.path.exists():
-            loaded = json.loads(self.path.read_text())
+            try:
+                loaded = json.loads(self.path.read_text())
+            except (json.JSONDecodeError, OSError):
+                loaded = None  # externally truncated / unreadable -- start empty
             if isinstance(loaded, dict):
                 self._store = loaded
 

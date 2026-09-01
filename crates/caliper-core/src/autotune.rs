@@ -6,6 +6,13 @@
 //! that, plus the config itself; [`AutotuneKey::to_key`] renders it to a stable
 //! string a cache keys on. Adding a config to a kernel changes only that
 //! config's key, so a re-sweep re-times only the new one.
+//!
+//! The config goes in the key **verbatim** as canonical JSON, not as a hash:
+//! autotune configs are small flat maps of tuning integers, `caliper-core` may
+//! not pull in a hashing crate (only `serde` / `serde_json`), and keeping the
+//! config readable makes a cache file inspectable. The `|`-separated components
+//! are version strings and hex hashes, none of which contain `|`, so the key is
+//! unambiguous even though nothing parses it back.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

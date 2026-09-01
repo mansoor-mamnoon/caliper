@@ -184,12 +184,13 @@ tagged release onward.
   YAML; Python reads the YAML, Rust validates and expands) into the
   deduplicated cartesian product of dtypes x layouts x resolved shapes, with a
   typed `SpecError` for every malformed field (unknown key, empty / unknown
-  dtype / layout, bad `warmup` / `cuda_graph`, zero `min_samples`, unknown
-  shape library, ...). `Cell::key` is the identity for dedupe and `--resume`;
-  `spec::pending` drops finished cells. A golden
-  `appendix_d.yaml` / `appendix_d.cells.json` pair pins the expansion from both
-  the Python (YAML) and Rust (JSON) sides. PyYAML is an optional dependency
-  (`caliper[sweep]`).
+  dtype / layout, bad `warmup` / `cuda_graph` / `autotune`, zero `min_samples`,
+  unknown shape library, ...). Inline shapes accept a bare `{M, N, K}` /
+  `{B, H, S, D}` (any case) as well as the tagged form. `Cell::key` is the
+  identity for dedupe and `--resume`; `spec::pending` drops finished cells. A
+  golden `appendix_d.yaml` / `appendix_d.cells.json` pair pins the expansion
+  from both the Python (YAML) and Rust (JSON) sides. PyYAML is an optional
+  dependency (`caliper[sweep]`).
 - `caliper.Grid` -- a table of `Result` rows: `.to_json()` / `.from_json()`
   (nested shape), `.to_parquet()` / `.from_parquet()` (one flattened row per
   measurement + a `toolchain_hash` column -- sha256 of the sorted toolkit map
@@ -205,9 +206,14 @@ tagged release onward.
   invalidates only that config's key, so a re-sweep re-times just the new one.
   The JSON-file store has hit/miss counters and an atomic flush.
 - `caliper.sweep(spec)` + `caliper sweep <spec.yaml>` -- expand a spec, run each
-  cell as one `bench()` call, and return a `Grid`. Each cell is checkpointed to
-  a `<output>.state.jsonl` sidecar and the Parquet/JSON output rewritten, so
-  `--resume` (or the spec's `output.resume`) continues a killed run without
-  re-measuring finished cells and keeps spec cell order. `run_cell=` overrides
-  how a cell is measured; the default replays a `<cell-key>.jsonl` recording
-  from `recordings_dir`.
+  cell (one `bench()` call per autotune config via `configs_for`, the fastest
+  kept), and return a `Grid`. Each cell is checkpointed to a
+  `<output>.state.jsonl` sidecar, so `--resume` (or the spec's `output.resume`)
+  continues a killed run without re-measuring finished cells and keeps spec cell
+  order; outputs are written once at the end via a temp file + atomic rename.
+  `run_cell=` overrides how a `(cell, config)` is measured; the default replays
+  a `<cell-key>.jsonl` recording from `recordings_dir`. `cache_path=` wires the
+  `AutotuneCache` in, so a re-sweep re-times only a newly-added config
+  (`tests/l6_e2e/test_autotune_cache.py` on a Colab A100; the hit/miss logic is
+  covered on the no-GPU path). `bench()` gains a `layout=` argument, threaded
+  onto the kernel label.

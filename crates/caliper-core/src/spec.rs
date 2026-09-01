@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::shapes::{self, Shape};
 
@@ -16,6 +17,8 @@ use crate::shapes::{self, Shape};
 const KNOWN_DTYPES: &[&str] = &["bf16", "fp16", "fp8_e4m3", "fp8_e5m2", "tf32", "fp32"];
 /// Memory layouts a sweep may request.
 const KNOWN_LAYOUTS: &[&str] = &["row", "col"];
+/// Autotune policies a sweep may request.
+const KNOWN_AUTOTUNE: &[&str] = &["from_kernel", "off"];
 /// The only schema version this build understands (0 = unset -> treated as 1).
 const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 
@@ -26,14 +29,50 @@ fn default_autotune() -> String {
     "from_kernel".to_string()
 }
 
-/// `shapes:` is either a library name or an inline list.
+/// `shapes:` is either a library name or an inline list of shape objects.
+/// Inline entries are parsed leniently by [`parse_inline_shape`]: a bare
+/// `{M, N, K}` (any case) is a GEMM, `{B, H, S, D}` is attention, and the
+/// tagged `{kind: gemm, ...}` form also works.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum ShapesField {
     /// A named library (see [`crate::shapes`]).
     Named(String),
-    /// An explicit shape list.
-    Inline(Vec<Shape>),
+    /// An explicit list of shape objects.
+    Inline(Vec<Value>),
+}
+
+/// Read a `u64` from a JSON object under any of `keys` (case as given).
+fn obj_u64(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<u64> {
+    keys.iter().find_map(|k| obj.get(*k)?.as_u64())
+}
+
+/// Parse one inline shape object, accepting the tagged form or a bare
+/// `{M,N,K}` / `{B,H,S,D}` (upper- or lower-case).
+fn parse_inline_shape(v: &Value) -> Result<Shape, SpecError> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| SpecError::BadShape(v.to_string()))?;
+
+    if obj.contains_key("kind") {
+        return serde_json::from_value(v.clone()).map_err(|e| SpecError::Parse(e.to_string()));
+    }
+    if let (Some(m), Some(n), Some(k)) = (
+        obj_u64(obj, &["m", "M"]),
+        obj_u64(obj, &["n", "N"]),
+        obj_u64(obj, &["k", "K"]),
+    ) {
+        return Ok(Shape::Gemm { m, n, k });
+    }
+    if let (Some(b), Some(h), Some(s), Some(d)) = (
+        obj_u64(obj, &["b", "B"]),
+        obj_u64(obj, &["h", "H"]),
+        obj_u64(obj, &["s", "S"]),
+        obj_u64(obj, &["d", "D"]),
+    ) {
+        return Ok(Shape::Attn { b, h, s, d });
+    }
+    Err(SpecError::BadShape(v.to_string()))
 }
 
 /// `bench.warmup` is `"auto"` or a fixed non-negative count.
@@ -176,6 +215,8 @@ pub enum SpecError {
     BadCudaGraph(String),
     /// `bench.min_samples` was zero.
     ZeroMinSamples,
+    /// `autotune:` was not `"from_kernel"` / `"off"`.
+    BadAutotune(String),
     /// `shapes:` named a library that does not exist.
     UnknownShapeLibrary(String),
     /// An inline shape has a non-positive dimension.
@@ -204,6 +245,9 @@ impl std::fmt::Display for SpecError {
                 )
             }
             Self::ZeroMinSamples => f.write_str("bench.min_samples must be greater than zero"),
+            Self::BadAutotune(a) => {
+                write!(f, "autotune {a:?} must be one of {KNOWN_AUTOTUNE:?}")
+            }
             Self::UnknownShapeLibrary(n) => write!(
                 f,
                 "unknown shape library {n:?}; known: {:?}",
@@ -266,18 +310,24 @@ pub fn expand(spec_json: &str) -> Result<Vec<Cell>, SpecError> {
     if spec.bench.min_samples == 0 {
         return Err(SpecError::ZeroMinSamples);
     }
+    if !KNOWN_AUTOTUNE.contains(&spec.autotune.as_str()) {
+        return Err(SpecError::BadAutotune(spec.autotune.clone()));
+    }
 
     let shapes: Vec<Shape> = match &spec.shapes {
         ShapesField::Named(name) => {
             shapes::resolve(name).ok_or_else(|| SpecError::UnknownShapeLibrary(name.clone()))?
         }
         ShapesField::Inline(list) => {
-            for s in list {
-                if !shape_is_positive(s) {
-                    return Err(SpecError::BadShape(s.label()));
+            let mut out = Vec::with_capacity(list.len());
+            for v in list {
+                let shape = parse_inline_shape(v)?;
+                if !shape_is_positive(&shape) {
+                    return Err(SpecError::BadShape(shape.label()));
                 }
+                out.push(shape);
             }
-            list.clone()
+            out
         }
     };
 
@@ -343,6 +393,43 @@ mod tests {
         // every key is unique
         let keys: HashSet<_> = cells.iter().map(Cell::key).collect();
         assert_eq!(keys.len(), 20);
+    }
+
+    #[test]
+    fn a_bare_inline_shape_needs_no_kind_tag() {
+        // Appendix D shows `{M, N, K}` -- upper- or lower-case, no `kind:`.
+        let json = r#"{"target":"corpus:gemm","dtypes":["bf16"],"shapes":[
+            {"M":512,"N":512,"K":512},
+            {"m":1024,"n":1024,"k":1024},
+            {"kind":"gemm","m":2048,"n":2048,"k":2048}]}"#;
+        let cells = expand(json).unwrap();
+        assert_eq!(cells.len(), 3);
+        assert_eq!(
+            serde_json::to_value(cells[0].shape).unwrap(),
+            serde_json::json!({"kind":"gemm","m":512,"n":512,"k":512})
+        );
+
+        // an attention shape works the same way
+        let attn = expand(
+            r#"{"target":"a.py::f","dtypes":["bf16"],"shapes":[{"B":1,"H":32,"S":2048,"D":128}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(attn[0].shape, Shape::Attn { s: 2048, .. }));
+
+        // a shape object with neither a kind nor recognisable dims is rejected
+        assert!(matches!(
+            expand(r#"{"target":"x","dtypes":["bf16"],"shapes":[{"rows":4}]}"#),
+            Err(SpecError::BadShape(_))
+        ));
+    }
+
+    #[test]
+    fn autotune_is_validated() {
+        assert!(expand(&spec_json(r#"["bf16"]"#, r#","autotune":"off""#)).is_ok());
+        assert_eq!(
+            expand(&spec_json(r#"["bf16"]"#, r#","autotune":"magic""#)),
+            Err(SpecError::BadAutotune("magic".to_string()))
+        );
     }
 
     #[test]

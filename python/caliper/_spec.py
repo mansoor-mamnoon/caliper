@@ -27,10 +27,18 @@ def _yaml_load(text: str) -> Any:
 
 
 def _spec_to_json(spec: str | Path | dict[str, Any]) -> str:
-    """Normalise a spec (a ``Path``, YAML text, or a dict) to a JSON string."""
+    """Normalise a spec (a dict, a ``Path``, a filename string, or YAML text) to
+    a JSON string. A one-line ``str`` that names an existing file is read as a
+    path; anything else is parsed as YAML text."""
     if isinstance(spec, dict):
         return json.dumps(spec)
-    parsed = _yaml_load(spec.read_text() if isinstance(spec, Path) else spec)
+    if isinstance(spec, Path):
+        text = spec.read_text()
+    elif "\n" not in spec and Path(spec).is_file():
+        text = Path(spec).read_text()
+    else:
+        text = spec
+    parsed = _yaml_load(text)
     if not isinstance(parsed, dict):
         raise ValueError("a sweep spec must be a YAML mapping")
     return json.dumps(parsed)
@@ -46,9 +54,9 @@ def parse_spec(spec: str | Path | dict[str, Any]) -> dict[str, Any]:
 def load_cells(spec: str | Path | dict[str, Any]) -> list[dict[str, Any]]:
     """Validate and expand a spec to its deduplicated cell list.
 
-    ``spec`` is a ``Path`` to the YAML file, the YAML text itself, or an
-    already-parsed dict (a plain ``str`` is always treated as YAML text, never a
-    path). Raises ``ValueError`` (with a typed message) on any malformed field.
+    ``spec`` is a dict, a ``Path`` / filename string pointing at a YAML file, or
+    the YAML text itself. Raises ``ValueError`` (with a typed message) on any
+    malformed field.
     """
     cells: list[dict[str, Any]] = json.loads(_core.expand_spec(_spec_to_json(spec)))
     return cells

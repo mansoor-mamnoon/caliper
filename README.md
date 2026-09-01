@@ -18,10 +18,9 @@ that you can tell whether to trust it.
 > **Status: early development.** The measurement engine, result schema, roofline
 > and occupancy models, `ptxas` parsing, the sweep planner, the `do_bench` shim,
 > and the command-line tool are built and tested. The on-device launcher (real
-> CUDA events, NVML clock locking, the reference kernels) runs on a CUDA host and
-> is validated on Google Colab; on a machine without a GPU everything works
-> against recorded device sessions. APIs and output formats will change until the
-> first tagged release.
+> CUDA events, NVML clock locking, the reference kernels) is still a stub, so for
+> now everything runs against recorded device sessions -- no GPU required. APIs
+> and output formats will change until the first tagged release.
 
 ## What it does
 
@@ -79,7 +78,9 @@ print(result.p50_us, result.roofline_pct, result.ptxas.spill_stores_bytes)
 ms = do_bench(fn, quantiles=[0.5, 0.2, 0.8])
 
 # a matrix -> Parquet, resumable
-grid = sweep("spec.yaml")
+from pathlib import Path
+
+grid = sweep(Path("spec.yaml"))
 ```
 
 ```

@@ -57,6 +57,8 @@ pub struct BenchOpts {
     pub warmup: WarmupPlan,
     /// Element dtype, recorded on the kernel label.
     pub dtype: Option<String>,
+    /// Memory layout (`"row"` / `"col"` / ...), recorded on the kernel label.
+    pub layout: Option<String>,
     /// Implementation family, recorded on the kernel label.
     pub kernel_impl: Option<String>,
     /// Roofline inputs (dtype + FLOP / HBM-byte counts) for the workload, when
@@ -77,6 +79,7 @@ impl Default for BenchOpts {
             clock_target: ClockTarget::default(),
             warmup: WarmupPlan::default(),
             dtype: None,
+            layout: None,
             kernel_impl: None,
             roofline: None,
         }
@@ -215,6 +218,7 @@ fn run_inner<L: DeviceLayer + ?Sized>(
             name: Some(opts.kernel_key.clone()),
             r#impl: opts.kernel_impl.clone(),
             dtype: opts.dtype.clone(),
+            layout: opts.layout.clone(),
             ..KernelLabel::default()
         },
         block_size: raw.block_size,

@@ -3,8 +3,8 @@
 ``bench()`` drives the device layer through one measurement and returns a
 :class:`~caliper.Result`. Today only the recorded-session path is wired up: pass
 ``fixture=`` a path to a JSON Lines device recording, or ``recording=`` its text.
-The on-device launcher (real CUDA events, clock locking) is implemented and
-validated on a CUDA host.
+The on-device launcher (real CUDA events, clock locking) is a typed stub; it
+runs on a CUDA host and is not yet implemented.
 """
 
 from __future__ import annotations
@@ -61,6 +61,7 @@ def bench(
     kernel_key: str = "kernel",
     kernel_impl: str | None = None,
     dtype: str | None = None,
+    layout: str | None = None,
     shape: dict[str, int] | None = None,
     batch: int = 32,
     batches: int = 50,
@@ -116,6 +117,7 @@ def bench(
         "kernel_key": kernel_key,
         "kernel_impl": kernel_impl,
         "dtype": dtype,
+        "layout": layout,
         "batch": batch,
         "batches": batches,
         "cuda_graph": _graph_mode(cuda_graph),
