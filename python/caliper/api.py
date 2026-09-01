@@ -344,6 +344,37 @@ def selftest(*, full: bool = False) -> dict[str, Any]:
     return report
 
 
+def validate_records(path: str | Path) -> dict[str, Any]:
+    """Validate every record in a `.json` / `.jsonl` / `.parquet` file against
+    the result schema.
+
+    Returns ``{"n": int, "n_invalid": int, "problems": [{"row": i, "problems":
+    [...]}], "ok": bool}``.
+    """
+    p = Path(path)
+    if p.suffix == ".parquet":
+        from caliper._grid import Grid
+
+        records = [r.to_dict() for r in Grid.from_parquet(p)]
+    elif p.suffix == ".jsonl":
+        records = [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+    else:
+        loaded = json.loads(p.read_text())
+        records = loaded if isinstance(loaded, list) else [loaded]
+
+    problems: list[dict[str, Any]] = []
+    for i, rec in enumerate(records):
+        row_problems = _core.validate_record_json(json.dumps(rec))
+        if row_problems:
+            problems.append({"row": i, "problems": row_problems})
+    return {
+        "n": len(records),
+        "n_invalid": len(problems),
+        "problems": problems,
+        "ok": not problems,
+    }
+
+
 def toolchain() -> dict[str, str | None]:
     """Detected local kernel toolchain (Triton, PyTorch, ``nvcc``, ``ptxas``).
 

@@ -1,9 +1,9 @@
 """Command-line entry point for caliper.
 
 Wired up so far: ``bench`` (recorded-session path), ``doctor``, ``fingerprint``,
-``selftest``, plus ``--version`` / ``--help``. Each command takes ``--json`` for
-machine-readable output. The sweep / compare / validate / submit commands are
-added as their supporting code lands.
+``selftest``, ``validate``, plus ``--version`` / ``--help``. Each command takes
+``--json`` for machine-readable output. The sweep / compare / submit commands
+are added as their supporting code lands.
 
 Exit codes: 0 success; 1 "not fit" (``doctor``) / "FAIL" (``selftest``);
 2 usage / runtime error / "ERROR" (``selftest``, including no device).
@@ -61,6 +61,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="also run O5 (cuBLAS) and the nsys cross-check",
     )
     p_st.add_argument("--json", action="store_true", help="print the Appendix-E report as JSON")
+
+    p_val = sub.add_parser("validate", help="check a results file against the schema")
+    p_val.add_argument("path", metavar="FILE", help="a .json / .jsonl / .parquet results file")
+    p_val.add_argument("--json", action="store_true", help="print the report as JSON")
 
     return parser
 
@@ -168,6 +172,23 @@ def _cmd_selftest(args: argparse.Namespace) -> int:
     return api.SELFTEST_EXIT_CODE.get(report["result"], 2)
 
 
+def _cmd_validate(args: argparse.Namespace) -> int:
+    try:
+        report = api.validate_records(args.path)
+    except (ValueError, OSError, ImportError) as exc:
+        print(f"caliper validate: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        for entry in report["problems"]:
+            for problem in entry["problems"]:
+                print(f"  row {entry['row']}: {problem}")
+        state = "OK" if report["ok"] else "INVALID"
+        print(f"{state}: {report['n']} record(s), {report['n_invalid']} invalid")
+    return 0 if report["ok"] else 1
+
+
 def _recording_text(args: argparse.Namespace) -> str | None:
     return Path(args.recording).read_text() if args.recording else None
 
@@ -188,6 +209,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_fingerprint(args)
     if args.command == "selftest":
         return _cmd_selftest(args)
+    if args.command == "validate":
+        return _cmd_validate(args)
     parser.print_help(sys.stderr)  # pragma: no cover - argparse rejects unknowns first
     return 2
 

@@ -140,6 +140,28 @@ def test_fingerprint_check_on_a_complete_recording(capsys: pytest.CaptureFixture
     assert report["missing_required"] == []
 
 
+def test_validate_a_clean_parquet(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    pytest.importorskip("pyarrow")
+    from caliper import Grid, Result
+
+    p = tmp_path / "g.parquet"
+    Grid([Result.default().to_dict()]).to_parquet(p)
+    code = main(["validate", str(p), "--json"])
+    assert code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is True and report["n"] == 1
+
+
+def test_validate_a_bad_json_file_exits_one(tmp_path: Path) -> None:
+    from caliper import Result
+
+    rec = Result.default().to_dict()
+    rec["timing"]["p50_us"] = -1.0
+    p = tmp_path / "g.json"
+    p.write_text(json.dumps([rec]))
+    assert main(["validate", str(p)]) == 1
+
+
 def test_selftest_without_a_gpu_is_an_error_report(capsys: pytest.CaptureFixture[str]) -> None:
     from caliper import _core
 

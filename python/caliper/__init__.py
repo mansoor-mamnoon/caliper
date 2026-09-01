@@ -9,6 +9,7 @@ change until the first tagged release.
 from __future__ import annotations
 
 from caliper import _core
+from caliper._grid import Grid
 from caliper._record import Result
 from caliper.api import bench, do_bench
 
@@ -20,4 +21,4 @@ def schema_version() -> str:
     return _core.schema_version()
 
 
-__all__ = ["Result", "__version__", "bench", "do_bench", "schema_version"]
+__all__ = ["Grid", "Result", "__version__", "bench", "do_bench", "schema_version"]
