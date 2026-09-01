@@ -38,6 +38,10 @@ dependencies = []
 [project.optional-dependencies]
 sweep = ["pyyaml>=6"]
 parquet = ["pyarrow>=15"]
+# The reference kernel corpus (python/caliper/corpus): Triton kernels + torch
+# vendor baselines. Needs a CUDA device to actually run; installs fine
+# anywhere so the corpus modules stay importable off-GPU.
+triton = ["torch>=2.3", "triton>=3.0"]
 dev = [
   "pytest>=8",
   "pytest-cov>=5",
@@ -90,6 +94,10 @@ disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
 module = "torch.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "triton.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
