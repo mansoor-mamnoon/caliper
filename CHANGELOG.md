@@ -328,3 +328,14 @@ tagged release onward.
   new reader runs it in a fresh Colab runtime with no local setup. The README
   gains a badge row, a "30 seconds" block, and a "Submit your GPU's numbers"
   section.
+- Acceptance harness (W4D4): `notebooks/acceptance.ipynb` works through the
+  scriptable Playbook-A steps on a Colab GPU -- version / doctor / selftest,
+  the `l2`/`l4`/`l6` tiers, a 30-cell `corpus:gemm` sweep
+  (`examples/acceptance-sweep.yaml` = `square-pow2` x 3 dtypes x 2 layouts) ->
+  `validate` -> `submit --dry-run`, the compare + negative-validate fixtures,
+  and the `do_bench` shim delta -- then writes a filled `report.md` and
+  `selftest-<arch>.json` to commit under `docs/acceptance/`.
+  `docs/acceptance/traceability.md` maps every FR-1..FR-19 / NFR-1..NFR-10 to
+  its CI evidence and its outstanding on-device step;
+  `tests/l0_unit/test_acceptance_traceability.py` fails if a requirement is
+  unmapped or the notebook / sweep spec drifts.

@@ -212,8 +212,12 @@ caliper validate bundle/                            # must print OK
 Then open a PR adding `bundle/` under `results/` in
 [`caliper-results`](results-repo/) -- the same `caliper validate` runs in the PR
 gate. Full instructions: [`results-repo/SUBMITTING.md`](results-repo/SUBMITTING.md).
-For a Tier-1 acceptance pass, work through
-[`docs/acceptance/manual-playbook.md`](docs/acceptance/manual-playbook.md).
+
+For a Tier-1 acceptance pass, run [`notebooks/acceptance.ipynb`](notebooks/acceptance.ipynb)
+(the scriptable half of [`docs/acceptance/manual-playbook.md`](docs/acceptance/manual-playbook.md))
+and file the report under `docs/acceptance/reports/`.
+[`docs/acceptance/traceability.md`](docs/acceptance/traceability.md) maps every
+FR / NFR to its CI evidence and its outstanding on-device step.
 
 ## License
 
