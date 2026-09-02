@@ -1,0 +1,11 @@
+experiment,arch,method,value_us,note
+fast_kernel,,naive_per_iter_sync,,run `make writeup-data` on a CUDA host
+fast_kernel,,do_bench_default,,run `make writeup-data` on a CUDA host
+fast_kernel,,caliper_batched,,run `make writeup-data` on a CUDA host
+fast_kernel,,nsys,,fill from `nsys stats`
+cold_warmup,,do_bench_warmup_25ms,,run `make writeup-data` on a CUDA host
+cold_warmup,,caliper_steady_state,,run `make writeup-data` on a CUDA host
+cold_warmup,,nsys,,fill from `nsys stats`
+l2_resident,,no_flush,,run `make writeup-data` on a CUDA host
+l2_resident,,do_bench_flushed,,run `make writeup-data` on a CUDA host
+l2_resident,,nsys,,fill from `nsys stats`
