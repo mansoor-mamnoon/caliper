@@ -264,13 +264,18 @@ tagged release onward.
   variance-aware regression diff. Two datasets are aligned by facet (kernel,
   impl, dtype, shape, layout, arch); each facet's candidate median is judged
   against a noise band derived from the baseline's MAD (`MAD -> sigma` via
-  1.4826, then `sigma_mult` sigmas, with a relative floor) or an explicit
-  `--threshold PCT`. The report carries the per-field `ptxas` / occupancy
-  deltas, a `spill_regression` flag when the candidate spills more, and the
-  autotune configs a facet had in the baseline but lost. `any_regression`
-  (what `--fail-on-regression` keys off) covers a timing *or* a spill
-  regression. `caliper compare --baseline --candidate [--arch] [--threshold]
-  [--fail-on-regression] [--json]` exits 0 ok / 1 regression / 2 error;
-  `_load_records` (shared with `validate`) reads `.json` / `.jsonl` /
-  `.parquet`. Exposed as `caliper._core.compare_datasets`. New fixtures
+  1.4826, then `sigma_mult` sigmas, with a 2% relative floor and a 50% cap so
+  neither a suspiciously tight nor a suspiciously noisy baseline can mislead)
+  or an explicit `--threshold PCT`. Each facet reports `delta` and `band` as
+  fractions, the per-field `ptxas` and occupancy deltas (both shown in the
+  human output for a regressed / improved / spilling facet), a
+  `spill_regression` flag when the candidate spills more, and the autotune
+  configs a facet had in the baseline but lost. `any_regression` (what
+  `--fail-on-regression` keys off) covers a timing *or* a spill regression --
+  a spill regression fails the run even when `--threshold` would forgive the
+  slowdown. `caliper compare --baseline --candidate [--arch] [--threshold]
+  [--fail-on-regression] [--json]` exits 0 ok / 1 regression / 2 error, and
+  warns on stderr when `--arch` matches no rows; `_load_records` (shared with
+  `validate`) reads `.json` / `.jsonl` / `.parquet`. Exposed as
+  `caliper._core.compare_datasets`. New fixtures
   `tests/testdata/{base,slow,spill}.{json,parquet}` (+ `build_parquet.py`).

@@ -585,7 +585,7 @@ Tier-1 archs must be all-PASS to release; Tier-2 archs are filed with triage not
 | 9 | Throttle handling | `sudo nvidia-smi -pl <~60% TDP>`; `caliper bench corpus:o3 --json t.json`; restore `-pl` | `throttle_reasons` non-empty; `invalidated_samples > 0`; run flagged | |
 | 10 | do_bench shim | edit Triton `03-matrix-multiplication.py` to `from caliper import do_bench`; run it | runs unchanged; numbers within 3% of `caliper.bench` p50 | |
 | 11 | Sweep + resume | `caliper sweep examples/mini.yaml --parquet s.parquet`; `kill` mid-run; rerun with `--resume` | resumes; final Parquet passes `caliper validate` | |
-| 12 | Compare catches regression | `caliper compare --baseline testdata/base.parquet --candidate testdata/slow.parquet --fail-on-regression` | exit 1; prints the slowdown **and** the spill delta | |
+| 12 | Compare catches regression | `caliper compare --baseline tests/testdata/base.parquet --candidate tests/testdata/slow.parquet --fail-on-regression` | exit 1; prints the slowdown **and** the spill delta | |
 | 13 | Submit dry-run | `caliper submit s.parquet --dry-run --out bundle/` | bundle has rows + fingerprint + calibration result + version; `caliper validate bundle/` passes | |
 | 14 | Negative validate | `caliper validate testdata/over_peak_row.parquet` etc. (4 bad fixtures) | each fails with a specific, correct message | |
 
@@ -826,7 +826,7 @@ GB/s, roofline bound) is proven against `ncu` / `nvbandwidth`; `selftest` exists
   regression verdict; ptxas/occupancy delta; "autotune configs dropped" detector.
   **DoD:** injected 10% slowdown fires; injected spill regression fires with the
   delta shown; within-noise stays silent. **Verify:** `pytest -m l0 -k
-  threshold` with `testdata/{base,slow,spill}.parquet`.
+  threshold` with `tests/testdata/{base,slow,spill}.parquet`.
 - **T2 (2h)** `caliper compare` CLI: `--baseline/--candidate/--arch/--threshold/
   --fail-on-regression/--json`; exit codes. **DoD:** playbook #12 passes.
   **Verify:** subprocess test.

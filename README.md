@@ -49,8 +49,9 @@ that you can tell whether to trust it.
 - **Catches regressions** -- `caliper compare` diffs two results files facet by
   facet against a variance-aware noise band (from the baseline's own MAD, or an
   explicit `--threshold`), so a real slowdown fires but run-to-run jitter
-  doesn't. It also surfaces the `ptxas` / occupancy deltas, flags a
-  register-spill increase, and lists autotune configs that stopped being timed;
+  doesn't. It prints the `ptxas` and occupancy deltas for a moved facet, flags a
+  register-spill increase (which fails the run even under an explicit
+  `--threshold`), and lists autotune configs that stopped being timed;
   `--fail-on-regression` makes it exit 1 for CI.
 - **Checks itself** -- `caliper selftest` runs on-device reference workloads
   whose correct answers are known from first principles and reports `PASS` /
