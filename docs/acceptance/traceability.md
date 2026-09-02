@@ -1,6 +1,6 @@
 # Acceptance traceability
 
-Every functional and non-functional requirement (`docs/plan.md` §1.4 / §1.5)
+Every functional and non-functional requirement (`docs/plan.md` §1.2 / §1.3)
 mapped to its evidence. **CI evidence** is what already runs on every push
 (`cargo test`, `pytest -m "l0 or l1"`). **On-device evidence** is a step of the
 [manual playbook](manual-playbook.md) or a GPU test tier (`l2`/`l3`/`l4`/`l6`),
@@ -52,8 +52,9 @@ run.
 
 Run [`notebooks/acceptance.ipynb`](../../notebooks/acceptance.ipynb) on the
 target GPU (Playbook A) or the golden box (Playbook B). It writes
-`reports/<arch>-<host>-<date>.md` and `selftest-<arch>.json`; commit both and
-flip the row to the arch it passed on. A deviation is filed as an issue and
+`<arch>-<host>-<date>.md` (commit under `reports/`) and `selftest-<arch>.json`
+(commit under [`../../selftest-reports/`](../../selftest-reports/)); flip the
+row to the arch it passed on. A deviation is filed as an issue and
 noted in the report's *Deviations / triage* block, then tracked to closure in
 [`triage.md`](triage.md). Tier-2 archs use the reduced bar in
 [`tier2.md`](tier2.md) and are not release-blocking.

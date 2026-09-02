@@ -5,8 +5,8 @@ release-blocking**: a Tier-2 report is filed with triage notes
 ([`triage.md`](triage.md)), and an open deviation on a Tier-2 arch can be waived
 for the release with a reason.
 
-See `docs/plan.md` §1.3 for the full tier table. The reachable Tier-2 targets
-for this release:
+See `docs/plan.md` §1.7 (platform support matrix) for the full tier table. The
+reachable Tier-2 targets for this release:
 
 | Arch | Rep GPU | Bar |
 |------|---------|-----|
@@ -27,9 +27,10 @@ The ROCm bar is only *"caliper runs and emits a valid row"*:
 
 1. `caliper doctor --json` — a verdict is produced; the AMD fields are populated
    (no hard error, no CUDA assumption).
-2. One corpus kernel end to end, e.g.
-   `caliper sweep examples/acceptance-sweep.yaml --parquet rows-mi300x.parquet`
-   reduced to a single cell, **or** `caliper bench corpus:gemm` on a recorded
+2. One corpus kernel end to end: a copy of `examples/acceptance-sweep.yaml`
+   trimmed to one dtype / one layout / one inline shape (there is no CLI flag to
+   subset cells) run with `caliper sweep <copy>.yaml --parquet
+   rows-mi300x.parquet`, **or** `caliper bench corpus:gemm` on a recorded
    session — whichever the ROCm launcher supports at the time.
 3. `caliper validate rows-mi300x.parquet` — the row passes the schema.
 

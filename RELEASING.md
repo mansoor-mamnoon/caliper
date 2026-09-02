@@ -24,6 +24,11 @@ Done) is checked**. In particular:
       `docs/acceptance/reports/`.
 - [ ] `CHANGELOG.md` has everything since the last release under
       `## [Unreleased]`.
+- [ ] The remaining §5 boxes are checked too: the community-loop row count
+      (≥ 3,000 rows from ≥ 4 archs merged to `caliper-results`), the writeup
+      regenerates via `make writeup-data` within tolerance, and the reference
+      docs (README, `docs/api.md`, `docs/cli.md`, `docs/shapes.md`,
+      `CONTRIBUTING.md`, `SUBMITTING.md`) are accurate to the frozen spec.
 
 ## Cutting the release
 
