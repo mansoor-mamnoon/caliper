@@ -36,8 +36,6 @@ jobs:
             exit 1
           }
 
-      - uses: dtolnay/rust-toolchain@stable
-
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -111,6 +109,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
@@ -120,21 +122,27 @@ jobs:
         run: |
           python - "$GITHUB_REF_NAME" > RELEASE_NOTES.md <<'PY'
           import re, sys, pathlib
-          tag = sys.argv[1].lstrip("v")
+          tag = sys.argv[1].removeprefix("v")
           text = pathlib.Path("CHANGELOG.md").read_text()
           m = re.search(rf"^## \[{re.escape(tag)}\].*?$(.*?)(?=^## \[|\Z)", text, re.M | re.S)
           sys.stdout.write((m.group(1).strip() if m else f"See CHANGELOG.md for {tag}.") + "\n")
           PY
           cat RELEASE_NOTES.md
 
-      - name: Collect acceptance evidence
+      - name: Collect release assets
         run: |
           mkdir -p release-assets
-          cp dist/* release-assets/ || true
-          cp docs/acceptance/reports/selftest-*.json release-assets/ 2>/dev/null || true
+          cp dist/* release-assets/
+          shopt -s nullglob
+          selftests=(selftest-reports/selftest-*.json)
+          cp "${selftests[@]}" release-assets/ 2>/dev/null || true
           cp docs/acceptance/reports/*ncu*.md release-assets/ 2>/dev/null || true
           cp docs/why-do_bench-misleads.md release-assets/ 2>/dev/null || true
           ls -la release-assets
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "${#selftests[@]}" -eq 0 ]; then
+            echo "::error::no selftest-reports/selftest-*.json to attach -- see RELEASING.md 'Before you tag'"
+            exit 1
+          fi
 
       - uses: softprops/action-gh-release@v2
         with:
