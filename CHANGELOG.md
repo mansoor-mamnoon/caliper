@@ -242,14 +242,18 @@ tagged release onward.
   alongside `corpus:gemm`.
 - `corpus.kernels.attention_fwd` / `attention_bwd` -- FlashAttention-style
   forward and backward Triton kernels plus their
-  `F.scaled_dot_product_attention` baselines, completing the FR-14 corpus.
-  Forward: online-softmax running max/sum, causal mask, grouped-query
-  attention (`h_kv` < `h`), head dim 64/128, bf16/fp16/fp32 (fp8 raises
-  `NotImplementedError`). Backward: a `delta = rowsum(dO*O)` preprocess
-  kernel, then one K/V block per program accumulating `dK`/`dV` with `dQ`
-  via atomics into an fp32 scratch; GQA by expand-then-group-reduce. Each
-  module exposes `check_numerics(cell)` returning an `allclose` verdict
-  against the baseline (the DoD's correctness gate). `roofline::corpus_spec`
+  `F.scaled_dot_product_attention` baselines. All five FR-14 kernels now have
+  a Triton implementation and a vendor baseline; on-device acceptance
+  (valid rows on SM80/86/89/90) and the attention fp8 path for L4 are still
+  pending on Colab. Forward: online-softmax running max/sum, causal mask,
+  grouped-query attention (`h_kv` < `h`), head dim 64/128, bf16/fp16/fp32
+  (fp8 raises `NotImplementedError`). Backward: a `delta = rowsum(dO*O)`
+  preprocess kernel, then one K/V block per program accumulating `dK`/`dV`
+  with `dQ` via atomics into an fp32 scratch; GQA by expand-then-group-reduce.
+  Both sides are timed backward-only (the baseline via `autograd.grad` over
+  one untimed forward). Each module exposes `check_numerics(cell)` returning
+  an `allclose` verdict against the baseline (the DoD's correctness gate).
+  `roofline::corpus_spec`
   gains an `attention` arm (needs `B`/`H`/`S`/`D`, optional `causal`):
   `4*B*H*S*S*D` FLOPs for the two matmuls (softmax omitted, <2%), halved for
   `causal`, `2.5x` for the backward; IO-aware `bytes_hbm` of `4*` (fwd) or

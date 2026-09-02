@@ -117,8 +117,9 @@ read. Head dim 64 or 128; `bf16` / `fp16` / `fp32` (an `fp8` path for L4 is a
 follow-up — `run()` raises `NotImplementedError` for it rather than silently
 downcasting).
 
-Baseline: `F.scaled_dot_product_attention`, with K/V expanded to the query
-head count so it works on any PyTorch version.
+Baseline: `F.scaled_dot_product_attention` (forward only), on K/V expanded to
+the query head count once outside the timed loop — so it works on any PyTorch
+version and is timed symmetrically with the Triton kernel.
 
 Correctness: `attention_fwd.check_numerics(cell)` runs the kernel and the SDPA
 baseline once (untimed) and returns `{max_abs_err, max_rel_err, allclose}`
@@ -142,10 +143,9 @@ accumulates `dK` / `dV` in registers, and adds into `dQ` with `tl.atomic_add`
 heads for the kernel and summing each group's `dK` / `dV` back down to `h_kv`
 afterward.
 
-Baseline: a full SDPA forward+backward through autograd — which is what
-"SDPA-backward" means, so the kernel's timing (backward only, given
-`Q,K,V,O,LSE,dO`) is not directly comparable to the baseline's; `baseline_pct`
-reflects that.
+Baseline: `torch.autograd.grad` over a single (untimed) SDPA forward — so both
+sides are timed **backward-only** (the Triton path from given
+`Q,K,V,O,LSE,dO`), and `baseline_pct` is a like-for-like ratio.
 
 Correctness: `attention_bwd.check_numerics(cell)` compares `dQ` / `dK` / `dV`
 against autograd (tolerance `3e-2` for bf16/fp16, `3e-3` for fp32).
