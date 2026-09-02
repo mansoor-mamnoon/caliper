@@ -1,11 +1,12 @@
 """Command-line entry point for caliper.
 
 Wired up so far: ``bench`` (recorded-session path), ``doctor``, ``fingerprint``,
-``selftest``, ``validate``, ``sweep``, plus ``--version`` / ``--help``. Most
-commands take ``--json`` for machine-readable output. The compare / submit
-commands are added as their supporting code lands.
+``selftest``, ``validate``, ``sweep``, ``compare``, plus ``--version`` /
+``--help``. Most commands take ``--json`` for machine-readable output. The
+submit command is added as its supporting code lands.
 
-Exit codes: 0 success; 1 "not fit" (``doctor``) / "FAIL" (``selftest``);
+Exit codes: 0 success; 1 "not fit" (``doctor``) / "FAIL" (``selftest``) /
+"regression" (``compare --fail-on-regression``) / "INVALID" (``validate``);
 2 usage / runtime error / "ERROR" (``selftest``, including no device).
 """
 
@@ -65,6 +66,23 @@ def _build_parser() -> argparse.ArgumentParser:
     p_val = sub.add_parser("validate", help="check a results file against the schema")
     p_val.add_argument("path", metavar="FILE", help="a .json / .jsonl / .parquet results file")
     p_val.add_argument("--json", action="store_true", help="print the report as JSON")
+
+    p_cmp = sub.add_parser("compare", help="diff two results files for regressions")
+    p_cmp.add_argument("--baseline", metavar="FILE", required=True, help="the reference dataset")
+    p_cmp.add_argument("--candidate", metavar="FILE", required=True, help="the dataset to check")
+    p_cmp.add_argument("--arch", metavar="SM", help="only compare rows on this sm_arch")
+    p_cmp.add_argument(
+        "--threshold",
+        type=float,
+        metavar="PCT",
+        help="explicit noise band in percent (e.g. 10); overrides the MAD-derived band",
+    )
+    p_cmp.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="exit 1 if any facet is a timing or register-spill regression",
+    )
+    p_cmp.add_argument("--json", action="store_true", help="print the full report as JSON")
 
     p_sw = sub.add_parser("sweep", help="run a sweep spec into a results file")
     p_sw.add_argument("spec", metavar="SPEC", help="a sweep spec YAML file")
@@ -198,6 +216,68 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0 if report["ok"] else 1
 
 
+def _fmt_ptxas_deltas(d: dict[str, object]) -> list[str]:
+    """The non-zero ptxas deltas as ``name +/-N`` strings."""
+    out: list[str] = []
+    for name, value in d.items():
+        if isinstance(value, int) and value != 0:
+            out.append(f"{name} {value:+d}")
+    return out
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    try:
+        report = api.compare(
+            args.baseline,
+            args.candidate,
+            arch=args.arch,
+            threshold=(args.threshold / 100.0) if args.threshold is not None else None,
+            fail_on_regression=args.fail_on_regression,
+        )
+    except (ValueError, OSError, ImportError) as exc:
+        print(f"caliper compare: {exc}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        s = report["summary"]
+        for facet in report["facets"]:
+            k = facet["key"]
+            name = " ".join(
+                str(part)
+                for part in (k["kernel"] or "?", k["dtype"], k["shape"], k["layout"], k["arch"])
+                if part
+            )
+            verdict = facet["verdict"]
+            delta = facet["delta_pct"]
+            band = facet["noise_band_pct"]
+            if delta is None:
+                print(f"  {verdict:12} {name}  (only on one side)")
+            else:
+                print(f"  {verdict:12} {name}  {delta * 100:+.1f}% (band +/-{band * 100:.1f}%)")
+            spill = _fmt_ptxas_deltas(facet["ptxas_delta"])
+            if facet["spill_regression"] or (verdict == "regression" and spill):
+                print(f"               ptxas: {', '.join(spill) or 'no change'}")
+            if facet["autotune_configs_dropped"]:
+                dropped = ", ".join(facet["autotune_configs_dropped"])
+                print(f"               autotune configs dropped: {dropped}")
+        print(
+            f"{s['facets']} facet(s): {s['regressions']} regression(s), "
+            f"{s['improvements']} improvement(s), {s['within_noise']} within noise, "
+            f"{s['spill_regressions']} spill regression(s), "
+            f"{s['configs_dropped']} with dropped configs"
+        )
+        if s["only_in_baseline"] or s["only_in_candidate"]:
+            print(
+                f"  unmatched: {s['only_in_baseline']} only in baseline, "
+                f"{s['only_in_candidate']} only in candidate"
+            )
+    if args.fail_on_regression:
+        return int(report["exit_code"])
+    return 0
+
+
 def _cmd_sweep(args: argparse.Namespace) -> int:
     try:
         grid = api.sweep(
@@ -236,6 +316,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_selftest(args)
     if args.command == "validate":
         return _cmd_validate(args)
+    if args.command == "compare":
+        return _cmd_compare(args)
     if args.command == "sweep":
         return _cmd_sweep(args)
     parser.print_help(sys.stderr)  # pragma: no cover - argparse rejects unknowns first

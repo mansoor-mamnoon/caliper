@@ -1,0 +1,48 @@
+[
+  {
+    "schema_version": "1",
+    "measured_at": "2026-09-02T12:00:00Z",
+    "kernel": {
+      "name": "gemm",
+      "impl": "triton",
+      "dtype": "bf16",
+      "shape": { "M": 4096, "N": 4096, "K": 4096 },
+      "layout": "row",
+      "autotune_config": { "BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32 }
+    },
+    "timing": {
+      "p10_us": 269.0, "p50_us": 272.0, "p90_us": 279.0, "mad_us": 1.6,
+      "mean_us": 273.0, "min_us": 267.0, "max_us": 285.0, "n_samples": 300
+    },
+    "ptxas": { "regs_per_thread": 176, "spill_loads_bytes": 0, "spill_stores_bytes": 256 },
+    "occupancy": { "theoretical": 0.23, "achieved": 0.221 },
+    "machine": {
+      "gpu_name": "NVIDIA A100-SXM4-40GB", "sm_arch": "sm_80", "vram_mib": 40960,
+      "sm_count": 108, "cuda_runtime": "12.4", "driver": "550.90.07"
+    },
+    "flags": []
+  },
+  {
+    "schema_version": "1",
+    "measured_at": "2026-09-02T12:00:05Z",
+    "kernel": {
+      "name": "rmsnorm",
+      "impl": "triton",
+      "dtype": "bf16",
+      "shape": { "ROWS": 8192, "COLS": 4096 },
+      "layout": "row",
+      "autotune_config": { "BLOCK_SIZE": 4096 }
+    },
+    "timing": {
+      "p10_us": 59.4, "p50_us": 60.3, "p90_us": 61.7, "mad_us": 0.5,
+      "mean_us": 60.5, "min_us": 59.0, "max_us": 63.2, "n_samples": 300
+    },
+    "ptxas": { "regs_per_thread": 32, "spill_loads_bytes": 0, "spill_stores_bytes": 0 },
+    "occupancy": { "theoretical": 0.5, "achieved": 0.48 },
+    "machine": {
+      "gpu_name": "NVIDIA A100-SXM4-40GB", "sm_arch": "sm_80", "vram_mib": 40960,
+      "sm_count": 108, "cuda_runtime": "12.4", "driver": "550.90.07"
+    },
+    "flags": []
+  }
+]

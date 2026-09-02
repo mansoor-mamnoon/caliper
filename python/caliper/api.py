@@ -20,6 +20,7 @@ from caliper._sweep import sweep
 __all__ = [
     "SELFTEST_EXIT_CODE",
     "bench",
+    "compare",
     "do_bench",
     "doctor",
     "doctor_text",
@@ -383,6 +384,21 @@ def selftest(*, full: bool = False) -> dict[str, Any]:
     return report
 
 
+def _load_records(path: str | Path) -> list[dict[str, Any]]:
+    """Every record in a `.json` / `.jsonl` / `.parquet` results file, as plain
+    dicts. Raises ``OSError`` / ``ValueError`` / ``ImportError`` for an
+    unreadable file."""
+    p = Path(path)
+    if p.suffix == ".parquet":
+        from caliper._grid import Grid
+
+        return [r.to_dict() for r in Grid.from_parquet(p)]
+    if p.suffix == ".jsonl":
+        return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+    loaded = json.loads(p.read_text())
+    return loaded if isinstance(loaded, list) else [loaded]
+
+
 def validate_records(path: str | Path) -> dict[str, Any]:
     """Validate every record in a `.json` / `.jsonl` / `.parquet` file against
     the result schema.
@@ -390,16 +406,7 @@ def validate_records(path: str | Path) -> dict[str, Any]:
     Returns ``{"n": int, "n_invalid": int, "problems": [{"row": i, "problems":
     [...]}], "ok": bool}``.
     """
-    p = Path(path)
-    if p.suffix == ".parquet":
-        from caliper._grid import Grid
-
-        records = [r.to_dict() for r in Grid.from_parquet(p)]
-    elif p.suffix == ".jsonl":
-        records = [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
-    else:
-        loaded = json.loads(p.read_text())
-        records = loaded if isinstance(loaded, list) else [loaded]
+    records = _load_records(path)
 
     problems: list[dict[str, Any]] = []
     for i, rec in enumerate(records):
@@ -416,6 +423,47 @@ def validate_records(path: str | Path) -> dict[str, Any]:
         "problems": problems,
         "ok": not problems,
     }
+
+
+def compare(
+    baseline: str | Path,
+    candidate: str | Path,
+    *,
+    arch: str | None = None,
+    threshold: float | None = None,
+    sigma_mult: float = 3.0,
+    floor_pct: float = 0.02,
+    fail_on_regression: bool = False,
+) -> dict[str, Any]:
+    """Diff two results files for variance-aware performance regressions.
+
+    Rows are aligned by *facet* (kernel, impl, dtype, shape, layout, arch). For
+    each facet the candidate median is judged against a noise band derived from
+    the baseline's MAD (``sigma_mult`` sigmas, ``floor_pct`` relative floor), or
+    against an explicit ``threshold`` (a fraction, e.g. ``0.10`` for 10%). The
+    ``ptxas`` / occupancy deltas and any dropped autotune configs are reported
+    per facet.
+
+    Returns the report dict (see ``docs``); ``report["any_regression"]`` is true
+    for a timing or a register-spill regression. With ``fail_on_regression`` the
+    report also carries ``"exit_code"`` (0 or 1).
+    """
+    opts = {
+        "arch": arch,
+        "threshold_pct": threshold,
+        "sigma_mult": sigma_mult,
+        "floor_pct": floor_pct,
+    }
+    report: dict[str, Any] = json.loads(
+        _core.compare_datasets(
+            json.dumps(_load_records(baseline)),
+            json.dumps(_load_records(candidate)),
+            json.dumps(opts),
+        )
+    )
+    if fail_on_regression:
+        report["exit_code"] = 1 if report["any_regression"] else 0
+    return report
 
 
 def toolchain() -> dict[str, str | None]:
