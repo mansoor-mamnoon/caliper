@@ -17,10 +17,11 @@ that you can tell whether to trust it.
 
 > **Status: early development.** The measurement engine, result schema, roofline
 > and occupancy models, `ptxas` parsing, the sweep planner, the regression
-> `compare`, the `do_bench` shim, and the command-line tool are built and
-> tested. The on-device launcher for the CUDA-C++ oracle kernels (real CUDA
-> events, NVML clock locking) is still a stub, so `bench()` runs against
-> recorded device sessions for now -- no GPU required.
+> `compare`, the `submit` bundle + validator, the `do_bench` shim, and the
+> command-line tool are built and tested. The on-device launcher for the
+> CUDA-C++ oracle kernels (real CUDA events, NVML clock locking) is still a
+> stub, so `bench()` runs against recorded device sessions for now -- no GPU
+> required.
 > The reference kernel corpus (`gemm`, `rmsnorm`, `softmax`, `attention_fwd`,
 > `attention_bwd` -- Triton, not CUDA C++) doesn't go through that launcher, so
 > it runs without waiting on it -- on any CUDA host, with on-device
@@ -56,7 +57,13 @@ that you can tell whether to trust it.
 - **Checks itself** -- `caliper selftest` runs on-device reference workloads
   whose correct answers are known from first principles and reports `PASS` /
   `FAIL` / `ERROR` with a coverage note; `caliper validate` checks a results file
-  against the schema.
+  against the schema, or a submission bundle against the shared results gate.
+- **Shares your GPU's numbers** -- `caliper submit` packs a results file into a
+  bundle (a manifest with the architecture, toolchain hash, clock-lock tier,
+  and determinism / calibration checks, plus the rows and the machine
+  fingerprint) that the community [`caliper-results`](results-repo/) repo's CI
+  validates on every PR -- the same gate `caliper validate <bundle>` runs
+  locally.
 - **Is Triton-compatible** -- `caliper.do_bench` matches `triton.testing.do_bench`
   argument for argument, so a script can swap the import.
 - **Ships a reference kernel corpus** -- `gemm`, `rmsnorm`, `softmax`,
@@ -70,7 +77,7 @@ that you can tell whether to trust it.
 
 | Layer | Language | What lives here |
 | --- | --- | --- |
-| `crates/caliper-core` | Rust | All measurement logic: the result schema, statistics, steady-state detection, the reduction pipeline, the roofline and occupancy models, `ptxas` / `cuobjdump` / HIP parsing, the sweep spec parser, the autotune cache key, the regression threshold model, the oracle checks and the `selftest` report. No GPU or Python dependency; tested with `cargo test`. |
+| `crates/caliper-core` | Rust | All measurement logic: the result schema, statistics, steady-state detection, the reduction pipeline, the roofline and occupancy models, `ptxas` / `cuobjdump` / HIP parsing, the sweep spec parser, the autotune cache key, the regression threshold model, the submit-bundle manifest and validator, the oracle checks and the `selftest` report. No GPU or Python dependency; tested with `cargo test`. |
 | `crates/caliper-gpu` | Rust | The device layer: four ports (launch, clocks, device info, module probe), a fixture player that replays a recorded session with no GPU, a recorder, and the feature-gated real CUDA/NVML implementations. |
 | `crates/caliper-ffi` | Rust (PyO3) | A thin binding layer that exposes the core to Python as `caliper._core`. |
 | `python/caliper` | Python | The public API, the command-line tool, the `do_bench` shim, YAML/Parquet I/O, and orchestration (`sweep`, `compare`). |
@@ -83,7 +90,7 @@ The full interface, data schema, and validation strategy are written up in
 ## Interface
 
 ```python
-from caliper import bench, compare, do_bench, sweep
+from caliper import bench, compare, do_bench, submit, sweep
 
 # one kernel, from a recorded device session (a live callable needs a CUDA host)
 result = bench(
@@ -106,6 +113,9 @@ grid = sweep(Path("spec.yaml"))
 report = compare("base.parquet", "candidate.parquet", fail_on_regression=True)
 print(report["summary"], report["any_regression"])
 
+# pack a bundle for the community results repo
+submit("results.parquet", out="bundle/")
+
 # a reference kernel, timed live (needs a CUDA host + `pip install 'caliper-gpu[triton]'`)
 from caliper.corpus.kernels import attention_fwd, gemm
 
@@ -119,8 +129,9 @@ caliper doctor            # is this machine set up to produce trustworthy number
 caliper fingerprint --check   # is the machine record complete?
 caliper bench corpus:o1 --recording session.jsonl
 caliper sweep spec.yaml --resume        # run a matrix -> results file
-caliper validate results.parquet        # check a results file against the schema
+caliper validate results.parquet        # check a results file (or a bundle dir)
 caliper compare --baseline base.parquet --candidate new.parquet --fail-on-regression
+caliper submit results.parquet --out bundle/   # pack a bundle for caliper-results
 caliper selftest --full                 # run the on-device oracle suite
 ```
 

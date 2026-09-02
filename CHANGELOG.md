@@ -279,3 +279,25 @@ tagged release onward.
   `validate`) reads `.json` / `.jsonl` / `.parquet`. Exposed as
   `caliper._core.compare_datasets`. New fixtures
   `tests/testdata/{base,slow,spill}.{json,parquet}` (+ `build_parquet.py`).
+- `caliper_core::submit` + `caliper.submit()` + `caliper submit` -- the
+  results-bundle flow. A bundle is `manifest.json` + `rows.parquet` +
+  `fingerprint.json`; the manifest summarises the arch, the Appendix-C
+  toolchain hash, the clock-lock tier, the sorted kernel names, and -- when the
+  rows contain them -- a determinism-repeat CoV (vs the 2%-locked / 5%-unlocked
+  tolerance) and a calibration-GEMM ratio (vs +/-8%). `caliper submit FILE...
+  [--out DIR] [--repo DIR] [--dry-run] [--calibration MEASURED EXPECTED]`
+  builds it; with `--repo` a local `caliper-results` checkout and
+  `--dry-run=false` the bundle lands on a fresh branch there.
+- `caliper validate` is now the shared results gate. A directory is read as a
+  bundle and checked by `caliper_core::submit::validate_bundle` --
+  per-row schema validity, the submission-strict extras (required fields,
+  `roofline_pct <= 1.05` rather than the schema's 1.5 recording clamp), and the
+  manifest / rows / fingerprint arch consistency plus the determinism and
+  calibration verdicts. Exposed as `caliper._core.submit_manifest` /
+  `validate_bundle`.
+- `results-repo/` -- the `caliper-results` scaffold: the
+  `results/<arch>/<toolchain-hash>/` layout, `SUBMITTING.md`, a `schema/`
+  pointer (the validator is the schema), and a PR workflow that runs `caliper
+  validate` on each changed bundle. Fixtures
+  `tests/testdata/{bundle_ok,bundle_missing_field,bundle_nonreproducing,bundle_slow_calibration}/`
+  + `over_peak_row.json` (+ `build_bundles.py`) cover playbooks #13 and #14.
