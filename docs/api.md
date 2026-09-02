@@ -181,5 +181,6 @@ attention_fwd.check_numerics({"shape": {"B": 4, "H": 32, "S": 4096, "D": 128}, "
 
 Each module exposes `KERNEL_KEY`, `SOURCE_HASH`, `roofline_spec(shape, dtype)`,
 `run(cell, config=None) -> Result`; the two `attention` modules add
-`check_numerics(cell) -> {"max_abs_err", "max_rel_err", "allclose"}`. See
-[`corpus.md`](corpus.md).
+`check_numerics(cell, config=None) -> {"max_abs_err", "max_rel_err",
+"allclose"}`. See [`corpus.md`](corpus.md). Shape libraries for `sweep` are in
+[`shapes.md`](shapes.md).

@@ -23,8 +23,9 @@ Most commands accept `--json` for a machine-readable report on stdout.
 ## `caliper bench [target] [--recording PATH] [--batch N] [--batches N] [--warmup W] [--cuda-graph {auto,on,off}] [--no-flush-l2] [--no-lock-clocks] [--json]`
 
 Measure one kernel. Needs `--recording` a JSON Lines device session (the live
-launcher is a CUDA-host stub). `target` may be `corpus:o1`..`corpus:o6` or a
-`corpus:*` reference kernel; an unknown `corpus:*` target is rejected (exit 2).
+launcher is a CUDA-host stub). `target` may be a built-in oracle
+(`corpus:o1`..`corpus:o4`, `corpus:o6`) or a `corpus:*` reference kernel
+(`corpus:gemm`, ...); an unknown `corpus:*` target is rejected (exit 2).
 `--warmup` is `"auto"` or an integer count of leading samples to trim. Non-JSON
 output prints the p50 / p10 / p90, the sample / trim / drop counts, and any
 flags.
@@ -60,7 +61,7 @@ fields + roofline bound + determinism / calibration / arch consistency). Exit
 Expand a sweep spec YAML and run it into a results file, checkpointing after
 every cell. `--recordings DIR` supplies one `<cell-key>.jsonl` per cell for the
 replay path. `--resume` continues from the `<output>.state.jsonl` sidecar.
-`--parquet` / `--json-out` override the spec's `output:` block.
+`--parquet` / `--json-out` override the spec's `output:` block. Exit `0` / `2`.
 
 ## `caliper compare --baseline FILE --candidate FILE [--arch SM] [--threshold PCT] [--fail-on-regression] [--json]`
 
