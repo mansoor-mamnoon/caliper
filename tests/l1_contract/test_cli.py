@@ -192,3 +192,88 @@ def test_selftest_without_a_gpu_is_an_error_report(capsys: pytest.CaptureFixture
     assert "exit_code" not in report  # the --json body is pure Appendix E
     assert set(report["not_validated"]) == {"clock_lock", "ncu_crosscheck", "powercap_throttle"}
     assert _core.validate_selftest_json(json.dumps(report)) == []
+
+
+# --- compare ---------------------------------------------------------------
+
+TESTDATA = Path(__file__).resolve().parents[1] / "testdata"
+
+
+def test_compare_playbook_12_exits_one_and_prints_slowdown_and_spill(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(
+        [
+            "compare",
+            "--baseline",
+            str(TESTDATA / "base.parquet"),
+            "--candidate",
+            str(TESTDATA / "slow.parquet"),
+            "--fail-on-regression",
+        ]
+    )
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "regression" in out
+    assert "+11.8%" in out  # the slowdown
+    assert "spill_stores_bytes +256" in out  # the spill delta, same command
+
+
+def test_compare_within_noise_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(
+        [
+            "compare",
+            "--baseline",
+            str(TESTDATA / "base.json"),
+            "--candidate",
+            str(TESTDATA / "base.json"),
+            "--fail-on-regression",
+        ]
+    )
+    assert code == 0
+    assert "1 regression" not in capsys.readouterr().out
+
+
+def test_compare_json_output_is_the_full_report(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(
+        [
+            "compare",
+            "--baseline",
+            str(TESTDATA / "base.json"),
+            "--candidate",
+            str(TESTDATA / "spill.json"),
+            "--json",
+        ]
+    )
+    assert code == 0  # no --fail-on-regression
+    report = json.loads(capsys.readouterr().out)
+    assert report["any_regression"] is True
+    assert report["summary"]["spill_regressions"] == 1
+
+
+def test_compare_threshold_is_a_percent(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(
+        [
+            "compare",
+            "--baseline",
+            str(TESTDATA / "base.json"),
+            "--candidate",
+            str(TESTDATA / "slow.json"),
+            "--threshold",
+            "20",
+            "--json",
+        ]
+    )
+    assert code == 0
+    report = json.loads(capsys.readouterr().out)
+    gemm = next(f for f in report["facets"] if f["key"]["kernel"] == "gemm")
+    assert gemm["noise_band_pct"] == 0.20
+    assert gemm["verdict"] == "within_noise"
+
+
+def test_compare_missing_file_exits_two(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(
+        ["compare", "--baseline", "/no/such.json", "--candidate", str(TESTDATA / "base.json")]
+    )
+    assert code == 2
+    assert "caliper compare:" in capsys.readouterr().err
