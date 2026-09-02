@@ -249,6 +249,55 @@ fn compare_datasets(
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+// --- submit / bundle validation --------------------------------------------
+
+/// Summarise a JSON array of records into a submit-bundle manifest (JSON).
+/// `calibration_json` is `null` or `{"measured_p50_us", "expected_p50_us"}`.
+/// Raises ``ValueError`` on a bad JSON shape or an empty / mixed-arch row set.
+#[pyfunction]
+fn submit_manifest(
+    rows_json: &str,
+    toolchain_hash: &str,
+    caliper_version: &str,
+    created_at: &str,
+    calibration_json: &str,
+) -> PyResult<String> {
+    let rows: Vec<caliper_core::schema::Record> = serde_json::from_str(rows_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid rows JSON: {e}")))?;
+    let calibration: Option<(f64, f64)> =
+        serde_json::from_str::<serde_json::Value>(calibration_json)
+            .map_err(|e| PyValueError::new_err(format!("invalid calibration JSON: {e}")))?
+            .as_object()
+            .and_then(|o| {
+                Some((
+                    o.get("measured_p50_us")?.as_f64()?,
+                    o.get("expected_p50_us")?.as_f64()?,
+                ))
+            });
+    let manifest = caliper_core::submit::derive_manifest(
+        &rows,
+        toolchain_hash,
+        caliper_version,
+        created_at,
+        calibration,
+    )
+    .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    serde_json::to_string(&manifest).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// Validate a bundle (manifest JSON + rows JSON array + fingerprint JSON).
+/// Returns the list of problems (empty when clean). Raises ``ValueError`` on a
+/// bad JSON shape.
+#[pyfunction]
+fn validate_bundle(
+    manifest_json: &str,
+    rows_json: &str,
+    fingerprint_json: &str,
+) -> PyResult<Vec<String>> {
+    caliper_core::submit::validate_bundle(manifest_json, rows_json, fingerprint_json)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 // --- corpus targets ------------------------------------------------------
 
 /// The kernel key for a `corpus:*` target, or `None` if it is not a known
@@ -537,6 +586,8 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(resolve_corpus_target, module)?)?;
     module.add_function(wrap_pyfunction!(corpus_targets, module)?)?;
     module.add_function(wrap_pyfunction!(compare_datasets, module)?)?;
+    module.add_function(wrap_pyfunction!(submit_manifest, module)?)?;
+    module.add_function(wrap_pyfunction!(validate_bundle, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_replay, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_render_replay, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_from_env, module)?)?;

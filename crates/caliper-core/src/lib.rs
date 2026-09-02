@@ -22,6 +22,7 @@ pub mod selftest;
 pub mod shapes;
 pub mod spec;
 pub mod stats;
+pub mod submit;
 pub mod thresholds;
 pub mod warmup;
 
@@ -47,6 +48,9 @@ pub use selftest::{CheckStatus, Coverage, Outcome, SelftestCheck, SelftestReport
 pub use shapes::{resolve as resolve_shape_library, Shape};
 pub use spec::{expand as expand_spec, pending as spec_pending, Cell, SpecError, SweepSpec};
 pub use stats::{cross_pass_cov, summarize, Summary};
+pub use submit::{
+    derive_manifest, validate_bundle, BundleError, Calibration, Determinism, Manifest, Tier,
+};
 pub use thresholds::{
     compare as compare_datasets, compare_json as compare_datasets_json, noise_band,
     verdict as regression_verdict, CompareOpts, CompareReport, Verdict,
