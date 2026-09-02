@@ -23,6 +23,16 @@ For a concrete walk through four ways a default `do_bench` call misleads --
 with reproduction scripts -- see
 [**Your Triton benchmark is probably lying to you**](docs/why-do_bench-misleads.md).
 
+**30 seconds** — no GPU needed:
+
+```bash
+pip install -e ".[dev]"     # from a clone (not on PyPI yet); builds the Rust core
+caliper doctor              # is this box fit to benchmark?
+caliper bench k --recording crates/caliper-gpu/fixtures/bench/happy.jsonl --batches 40 --json
+```
+
+Or [**open the quickstart in Colab**](https://colab.research.google.com/github/mansoor-mamnoon/caliper/blob/main/notebooks/quickstart.ipynb).
+
 > **Status: early development.** The measurement engine, result schema, roofline
 > and occupancy models, `ptxas` parsing, the sweep planner, the regression
 > `compare`, the `submit` bundle + validator, the `do_bench` shim, and the
@@ -95,32 +105,9 @@ with reproduction scripts -- see
 | `crates/caliper-gpu/kernels` *(Colab)* | CUDA C++ | The on-device oracle kernels O1-O7. |
 
 Full reference: [`docs/api.md`](docs/api.md) (every public symbol + the record
-schema), [`docs/cli.md`](docs/cli.md) (every command + exit codes). The design
-doc is [`docs/plan.md`](docs/plan.md).
-
-## 30 seconds
-
-```bash
-pip install -e ".[dev]"           # from a clone (not on PyPI yet); builds the Rust core
-caliper doctor                    # is this box fit to benchmark?
-caliper bench k --recording session.jsonl --json   # measure (replay path)
-```
-
-```python
-from caliper import bench, do_bench
-
-r = bench(
-    "corpus:gemm",
-    recording=open("session.jsonl").read(),
-    shape={"M": 4096, "N": 4096, "K": 4096},
-    dtype="bf16",
-)
-print(r.p50_us, r.roofline_pct, r.flags)
-
-ms = do_bench(fn, quantiles=[0.5, 0.2, 0.8])  # a Triton script only swaps the import
-```
-
-No GPU? [**Open the quickstart in Colab.**](https://colab.research.google.com/github/mansoor-mamnoon/caliper/blob/main/notebooks/quickstart.ipynb)
+schema), [`docs/cli.md`](docs/cli.md) (every command + exit codes),
+[`docs/shapes.md`](docs/shapes.md) (the named shape libraries). The design doc
+is [`docs/plan.md`](docs/plan.md).
 
 ## Interface
 
@@ -217,7 +204,7 @@ card. If you have a GPU:
 
 ```bash
 caliper selftest --full --json > selftest.json     # confirm the box is fit
-caliper sweep corpus.yaml --parquet rows.parquet   # or your own kernels
+caliper sweep examples/corpus.yaml --parquet rows.parquet   # or your own kernels
 caliper submit rows.parquet --out bundle/ --calibration <measured_us> <expected_us>
 caliper validate bundle/                            # must print OK
 ```

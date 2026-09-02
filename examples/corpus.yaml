@@ -1,0 +1,21 @@
+# A small corpus sweep -- one kernel, a few square power-of-two shapes.
+# `caliper sweep examples/corpus.yaml --parquet rows.parquet`
+# See docs/plan.md Appendix D for the full spec grammar and docs/shapes.md for
+# the named shape libraries.
+schema_version: 1
+target: corpus:gemm
+dtypes: [bf16]
+layouts: [row]
+shapes:
+  - { M: 1024, N: 1024, K: 1024 }
+  - { M: 2048, N: 2048, K: 2048 }
+  - { M: 4096, N: 4096, K: 4096 }
+bench:
+  warmup: auto
+  min_samples: 200
+  flush_l2: true
+  lock_clocks: true
+  cuda_graph: auto
+autotune: from_kernel
+output:
+  parquet: rows.parquet
