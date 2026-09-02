@@ -1,0 +1,18 @@
+# The 30-cell corpus sweep for the acceptance playbook (W4D4):
+#   square-pow2 (5 shapes) x {bf16, fp16, fp8_e4m3} x {row, col} = 30 cells.
+# `caliper sweep examples/acceptance-sweep.yaml --parquet rows-<arch>.parquet`
+schema_version: 1
+target: corpus:gemm
+dtypes: [bf16, fp16, fp8_e4m3]
+layouts: [row, col]
+shapes: square-pow2
+bench:
+  warmup: auto
+  min_samples: 200
+  flush_l2: true
+  lock_clocks: true
+  cuda_graph: auto
+autotune: from_kernel
+output:
+  parquet: rows.parquet
+  resume: true
