@@ -339,3 +339,19 @@ tagged release onward.
   its CI evidence and its outstanding on-device step;
   `tests/l0_unit/test_acceptance_traceability.py` fails if a requirement is
   unmapped or the notebook / sweep spec drifts.
+- Release path: `.github/workflows/release.yml` fires on a `vX.Y.Z` tag --
+  builds the sdist and cp310-cp312 manylinux wheels, checks the tag against the
+  crate version, publishes to Test PyPI and then (behind a manual approval on
+  the `pypi` environment) to PyPI via OIDC trusted publishing, and opens a
+  GitHub Release whose notes come from the matching `CHANGELOG.md` section with
+  the wheels, every `selftest-*.json`, the golden-box `ncu` report, and the
+  do_bench writeup attached. `workflow_dispatch` runs the build + Test PyPI
+  rehearsal only. `RELEASING.md` is the checklist: the `docs/plan.md` §5
+  Definition-of-Done gate, the version bump, the tag, and the post-release
+  fresh-Colab `pip install` check.
+- Acceptance triage + Tier-2: `docs/acceptance/triage.md` is the deviation loop
+  (file -> classify Tier-1 blocking / Tier-2 best-effort -> fix -> re-run the
+  affected step -> close) with a log table and an
+  `acceptance-deviation` issue template; `docs/acceptance/tier2.md` sets the
+  reduced bar for SM86 (full Playbook A) and MI300X / CDNA3 (`doctor` + one
+  corpus kernel + `validate` only), both explicitly not release-blocking.

@@ -197,6 +197,11 @@ the Rust suite and the `l0`/`l1` Python tests on every push; the GPU tiers run
 on Colab. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the push -> Colab -> PR loop,
 plus how to add an architecture, a corpus kernel, or a device backend.
 
+Releases are cut by pushing a `vX.Y.Z` tag: `.github/workflows/release.yml`
+builds the wheels, publishes to Test PyPI then PyPI, and opens a GitHub Release
+with the acceptance evidence attached. [`RELEASING.md`](RELEASING.md) is the
+pre-tag checklist.
+
 ## Submit your GPU's numbers
 
 The roofline needs real per-SKU data, and the corpus needs runs on more than one
@@ -217,7 +222,10 @@ For a Tier-1 acceptance pass, run [`notebooks/acceptance.ipynb`](notebooks/accep
 (the scriptable half of [`docs/acceptance/manual-playbook.md`](docs/acceptance/manual-playbook.md))
 and file the report under `docs/acceptance/reports/`.
 [`docs/acceptance/traceability.md`](docs/acceptance/traceability.md) maps every
-FR / NFR to its CI evidence and its outstanding on-device step.
+FR / NFR to its CI evidence and its outstanding on-device step; any deviation is
+tracked in [`docs/acceptance/triage.md`](docs/acceptance/triage.md). Consumer
+and AMD cards run the lighter, non-blocking bar in
+[`docs/acceptance/tier2.md`](docs/acceptance/tier2.md).
 
 ## License
 
