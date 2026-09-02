@@ -14,9 +14,11 @@ The three experiments behind [`docs/why-do_bench-misleads.md`](../docs/why-do_be
 | `l2_resident.py` | an L2-resident working set timed with vs without a cache flush |
 
 ```bash
-make writeup-data          # runs all three -> docs/data/misleads.csv
+make writeup-data          # runs all three -> docs/data/misleads.csv (atomic)
 python examples/misleads/fast_kernel.py          # one experiment, prints a table
 python examples/misleads/fast_kernel.py --nsys   # spin mode, for `nsys profile`
 ```
 
-Each script also prints the `nsys` command to fill in the ground-truth column.
+Run `make writeup-data` in a **fresh** runtime: `cold_warmup` runs first and
+needs a genuinely cold device. Each script also prints the `nsys` command to
+fill in the ground-truth column by hand.

@@ -22,16 +22,16 @@ from examples.misleads._common import (
     do_bench_median_us,
     no_flush_median_us,
     report,
+    require_cuda,
 )
 
 MB = 1 << 20
-BYTES = 8 * MB  # 8 MiB: comfortably inside the L2 of an A100 / L4 / H100
+IN_BYTES = 8 * MB  # 8 MiB input: well inside the L2 of an A100 (40) / L4 (48) / H100 (50)
 
 
 def kernel() -> Any:
-    import torch
-
-    x = torch.randn(BYTES // 4, device="cuda")  # fp32
+    torch = require_cuda()
+    x = torch.randn(IN_BYTES // 4, device="cuda")  # fp32
     out = torch.empty_like(x)
 
     def fn() -> None:
@@ -40,27 +40,25 @@ def kernel() -> Any:
     return fn
 
 
-def main(*, write: bool) -> None:
+def main() -> list[dict[str, str]]:
     fn = kernel()
     warm = no_flush_median_us(fn)
     flushed = do_bench_median_us(fn)
-    report(
+    rows = report(
         "l2_resident",
         {"no_flush": warm, "do_bench_flushed": flushed},
-        note=f"{BYTES // MB} MiB working set (fits in L2)",
-        write=write,
+        note=f"{IN_BYTES // MB} MiB input (fits in L2)",
     )
     if warm:
         print(f"  flush penalty:  {flushed / warm:5.2f}x")
+    return rows
 
 
 if __name__ == "__main__":
     if "--nsys" in sys.argv:
-        import torch
-
         fn = kernel()
         for _ in range(4000):
             fn()
-        torch.cuda.synchronize()
+        require_cuda().cuda.synchronize()
     else:
-        main(write="--write" in sys.argv)
+        main()

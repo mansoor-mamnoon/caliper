@@ -84,7 +84,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = ["python/caliper", "tests"]
+files = ["python/caliper", "tests", "examples"]
 mypy_path = "python"
 warn_unused_configs = true
 
