@@ -1,18 +1,19 @@
 """corpus:attention_bwd -- FlashAttention-style backward: a Triton kernel + the
 SDPA autograd baseline.
 
-The backward pass for scaled-dot-product attention. A preprocess kernel forms
-``delta = rowsum(dO * O)``; the main kernel takes one K/V block per program,
-sweeps the query blocks, and accumulates ``dK`` / ``dV`` locally while adding
-into ``dQ`` with atomics (the FlashAttention-2 shape). Causal supported;
-grouped-query attention is handled by expanding K/V to the query head count
-and summing each group's ``dK`` / ``dV`` back down afterward. bf16 / fp16 /
-fp32; head dim 64 or 128.
+The backward pass for scaled-dot-product attention (this kernel follows the
+FlashAttention-2 backward structure, it is not copied from any upstream file).
+A preprocess kernel forms ``delta = rowsum(dO * O)``; the main kernel takes one
+K/V block per program, sweeps the query blocks, accumulates ``dK`` / ``dV`` in
+registers, and adds into ``dQ`` with atomics (``dQ`` is an fp32 scratch
+buffer, cast down on return). Causal supported; grouped-query attention is
+handled by expanding K/V to the query head count and summing each group's
+``dK`` / ``dV`` back down afterward. bf16 / fp16 / fp32; head dim 64 or 128.
 
-The Triton path is timed on its own (``dQ`` / ``dK`` / ``dV`` from given
-``Q, K, V, O, LSE, dO``); the baseline times a full SDPA forward+backward,
-which is what "SDPA-backward" means. Both go through
-:func:`caliper.live_timing_ms`; see ``caliper.corpus._common`` for why.
+Both sides are timed backward-only: the Triton path from given
+``Q, K, V, O, LSE, dO``; the baseline as ``torch.autograd.grad`` over a single
+(untimed) SDPA forward. Both go through :func:`caliper.live_timing_ms`; see
+``caliper.corpus._common`` for why.
 
 Importable without Triton or PyTorch; :func:`run` needs both, plus a CUDA
 device.
@@ -25,8 +26,9 @@ from typing import Any
 from caliper import Result
 from caliper.corpus._common import (
     assemble_result,
+    attention_dims,
+    attention_torch_dtype,
     content_hash,
-    dim,
     require_live_deps,
     roofline_spec_for,
     time_kernel,
@@ -42,6 +44,7 @@ except ImportError:  # pragma: no cover - triton not installed on the dev box
     TRITON_AVAILABLE = False
 
 __all__ = [
+    "CONFIG",
     "KERNEL_KEY",
     "SOURCE_HASH",
     "check_numerics",
@@ -54,8 +57,9 @@ __all__ = [
 KERNEL_KEY = "corpus:attention_bwd"
 SOURCE_HASH = content_hash(__file__)
 
+#: (BLOCK_M, BLOCK_N) tile default; a caller's ``run(cell, config)`` override
+#: is applied and recorded (see ``attention_fwd.CONFIG``).
 CONFIG = {"BLOCK_M": 64, "BLOCK_N": 64}
-_TORCH_DTYPES = ("bf16", "fp16", "fp32")
 
 if TRITON_AVAILABLE:
 
@@ -133,19 +137,19 @@ if TRITON_AVAILABLE:
             q = tl.load(q_ptr + q_ptrs, mask=m_mask[:, None], other=0.0).to(tl.float32)
             do = tl.load(do_ptr + q_ptrs, mask=m_mask[:, None], other=0.0).to(tl.float32)
 
-            qk = tl.dot(q, tl.trans(k)) * sm_scale
+            qk = tl.dot(q, tl.trans(k), allow_tf32=False) * sm_scale
             qk += tl.where(n_mask[None, :], 0.0, float("-inf"))
             if CAUSAL:
                 qk += tl.where(offs_m[:, None] >= offs_n[None, :], 0.0, float("-inf"))
             lse_m = tl.load(lse_ptr + off_bh * n_ctx + offs_m, mask=m_mask, other=0.0)
             p = tl.exp(qk - lse_m[:, None])
 
-            dv += tl.dot(tl.trans(p), do)
-            dp = tl.dot(do, tl.trans(v))
+            dv += tl.dot(tl.trans(p), do, allow_tf32=False)
+            dp = tl.dot(do, tl.trans(v), allow_tf32=False)
             delta_m = tl.load(delta_ptr + off_bh * n_ctx + offs_m, mask=m_mask, other=0.0)
             ds = p * (dp - delta_m[:, None]) * sm_scale
-            dk += tl.dot(tl.trans(ds), q)
-            dq = tl.dot(ds, k)
+            dk += tl.dot(tl.trans(ds), q, allow_tf32=False)
+            dq = tl.dot(ds, k, allow_tf32=False)
             tl.atomic_add(dq_ptr + q_ptrs, dq, mask=m_mask[:, None])
 
         tl.store(dk_ptr + kv_ptrs, dk.to(dk_ptr.dtype.element_ty), mask=n_mask[:, None])
@@ -162,36 +166,28 @@ def roofline_spec(shape: dict[str, Any], dtype: str) -> dict[str, Any] | None:
     return roofline_spec_for(KERNEL_KEY, shape, dtype)
 
 
-def _dims(cell: dict[str, Any]) -> tuple[int, int, int, int, int, bool]:
-    shape = cell["shape"]
-    b, h, s, d = (
-        dim(shape, "b", "B"),
-        dim(shape, "h", "H"),
-        dim(shape, "s", "S"),
-        dim(shape, "d", "D"),
-    )
-    h_kv = int(cell.get("h_kv") or shape.get("h_kv") or h)
-    if h % h_kv != 0:
-        raise ValueError(f"h={h} must be a multiple of h_kv={h_kv}")
-    causal = bool(cell.get("causal") or shape.get("causal") or False)
-    return b, h, s, d, h_kv, causal
+def _resolve(config: dict[str, int] | None) -> dict[str, int]:
+    return {**CONFIG, **(config or {})}
 
 
-def _torch_dtype(dtype_name: str) -> Any:
+def _expanded_qkv(
+    b: int, h: int, s: int, d: int, h_kv: int, torch_dtype: Any
+) -> tuple[Any, Any, Any]:
+    """Random Q ``(b, h, s, d)`` and K/V expanded to ``h`` heads (GQA)."""
     import torch
 
-    if dtype_name not in _TORCH_DTYPES:
-        raise NotImplementedError(
-            f"corpus:attention_bwd supports {_TORCH_DTYPES}; {dtype_name!r} is a follow-up."
-        )
-    return {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[dtype_name]
+    q = torch.randn((b, h, s, d), device="cuda", dtype=torch_dtype)
+    k = torch.randn((b, h_kv, s, d), device="cuda", dtype=torch_dtype)
+    v = torch.randn((b, h_kv, s, d), device="cuda", dtype=torch_dtype)
+    group = h // h_kv
+    return q, k.repeat_interleave(group, dim=1), v.repeat_interleave(group, dim=1)
 
 
 def _reference_fwd(q: Any, k: Any, v: Any, causal: bool) -> tuple[Any, Any]:
-    """``O`` and log-sum-exp for the given (already head-expanded) Q/K/V, in
-    plain torch -- the backward kernel's inputs, formed untimed."""
+    """``O`` (in the input dtype) and its fp32 log-sum-exp for the given
+    (head-expanded) Q/K/V -- the backward kernel's inputs, formed untimed and
+    consistently in fp32 so ``O`` and ``LSE`` correspond exactly."""
     import torch
-    import torch.nn.functional as F
 
     scale = 1.0 / (q.shape[-1] ** 0.5)
     scores = (q.float() @ k.float().transpose(-1, -2)) * scale
@@ -199,23 +195,40 @@ def _reference_fwd(q: Any, k: Any, v: Any, causal: bool) -> tuple[Any, Any]:
         s = q.shape[-2]
         cmask = torch.triu(torch.ones(s, s, device=q.device, dtype=torch.bool), diagonal=1)
         scores = scores.masked_fill(cmask, float("-inf"))
-    lse = torch.logsumexp(scores, dim=-1)  # (b, h, s)
-    o = F.scaled_dot_product_attention(q, k, v, is_causal=causal)
+    lse = torch.logsumexp(scores, dim=-1)  # (b, h, s), fp32
+    p = torch.softmax(scores, dim=-1)
+    o = (p @ v.float()).to(q.dtype)
     return o, lse
 
 
-def _launch_bwd(
-    q: Any, k: Any, v: Any, o: Any, lse: Any, do: Any, causal: bool
-) -> tuple[Any, Any, Any]:
+def _alloc_bufs(q: Any) -> dict[str, Any]:
     import torch
 
     b, h, s, d = q.shape
-    delta = torch.empty((b * h, s), device="cuda", dtype=torch.float32)
-    dq = torch.zeros((b, h, s, d), device="cuda", dtype=torch.float32)
-    dk = torch.empty_like(q)
-    dv = torch.empty_like(q)
+    return {
+        "delta": torch.empty((b * h, s), device="cuda", dtype=torch.float32),
+        "dq": torch.zeros((b, h, s, d), device="cuda", dtype=torch.float32),
+        "dk": torch.empty_like(q),
+        "dv": torch.empty_like(q),
+    }
+
+
+def _launch_bwd(
+    q: Any,
+    k: Any,
+    v: Any,
+    o: Any,
+    lse: Any,
+    do: Any,
+    causal: bool,
+    cfg: dict[str, int],
+    bufs: dict[str, Any],
+) -> tuple[Any, Any, Any]:
+    b, h, s, d = q.shape
+    delta, dq, dk, dv = bufs["delta"], bufs["dq"], bufs["dk"], bufs["dv"]
+    dq.zero_()  # atomics accumulate into it
     sm_scale = 1.0 / (d**0.5)
-    block_m, block_n = CONFIG["BLOCK_M"], CONFIG["BLOCK_N"]
+    block_m, block_n = cfg["BLOCK_M"], cfg["BLOCK_N"]
     assert _preprocess is not None and kernel is not None
     _preprocess[(triton.cdiv(s, block_m), b * h)](
         o,
@@ -262,33 +275,22 @@ def _group_reduce(grad: Any, h_kv: int) -> Any:
     return grad.view(b, h_kv, h // h_kv, s, d).sum(dim=2)
 
 
-def _expanded_qkv(
-    b: int, h: int, s: int, d: int, h_kv: int, torch_dtype: Any
-) -> tuple[Any, Any, Any]:
-    import torch
-
-    q = torch.randn((b, h, s, d), device="cuda", dtype=torch_dtype)
-    k = torch.randn((b, h_kv, s, d), device="cuda", dtype=torch_dtype)
-    v = torch.randn((b, h_kv, s, d), device="cuda", dtype=torch_dtype)
-    group = h // h_kv
-    return q, k.repeat_interleave(group, dim=1), v.repeat_interleave(group, dim=1)
-
-
 def check_numerics(cell: dict[str, Any], config: dict[str, int] | None = None) -> dict[str, Any]:
     """Run the Triton backward and torch autograd once (untimed) and compare
-    ``dQ`` / ``dK`` / ``dV``. Returns ``{"max_abs_err", "max_rel_err",
-    "allclose"}``. Needs Triton, PyTorch, and a CUDA device."""
+    ``dQ`` / ``dK`` / ``dV`` (reduced to ``h_kv`` heads). Returns
+    ``{"max_abs_err", "max_rel_err", "allclose"}``. Needs Triton, PyTorch, and
+    a CUDA device."""
     require_live_deps("attention_bwd")
     import torch
     import torch.nn.functional as F
 
-    b, h, s, d, h_kv, causal = _dims(cell)
-    torch_dtype = _torch_dtype(cell.get("dtype", "bf16"))
+    b, h, s, d, h_kv, causal = attention_dims(cell)
+    torch_dtype = attention_torch_dtype(cell.get("dtype", "bf16"))
     q, k, v = _expanded_qkv(b, h, s, d, h_kv, torch_dtype)
     do = torch.randn_like(q)
 
     o, lse = _reference_fwd(q, k, v, causal)
-    dq_t, dk_t, dv_t = _launch_bwd(q, k, v, o, lse, do, causal)
+    dq_t, dk_t, dv_t = _launch_bwd(q, k, v, o, lse, do, causal, _resolve(config), _alloc_bufs(q))
 
     qa, ka, va = (x.clone().detach().requires_grad_(True) for x in (q, k, v))
     F.scaled_dot_product_attention(qa, ka, va, is_causal=causal).backward(do)
@@ -310,31 +312,40 @@ def check_numerics(cell: dict[str, Any], config: dict[str, int] | None = None) -
 
 def run(cell: dict[str, Any], config: dict[str, int] | None = None) -> Result:
     """Time this attention backward at ``cell``'s shape/dtype (``cell`` may also
-    carry ``causal`` / ``h_kv``), against a full SDPA forward+backward. Needs
-    Triton, PyTorch, and a CUDA device."""
+    carry ``causal`` / ``h_kv``). Both sides are backward-only: the Triton path
+    from given ``Q,K,V,O,LSE,dO``; the baseline as ``autograd.grad`` over one
+    untimed SDPA forward. Needs Triton, PyTorch, and a CUDA device."""
     require_live_deps("attention_bwd")
     import torch
     import torch.nn.functional as F
 
-    b, h, s, d, h_kv, causal = _dims(cell)
+    b, h, s, d, h_kv, causal = attention_dims(cell)
     dtype_name = cell.get("dtype", "bf16")
-    torch_dtype = _torch_dtype(dtype_name)
+    torch_dtype = attention_torch_dtype(dtype_name)
+    cfg = _resolve(config)
     q, k, v = _expanded_qkv(b, h, s, d, h_kv, torch_dtype)
     do = torch.randn_like(q)
     o, lse = _reference_fwd(q, k, v, causal)
+    bufs = _alloc_bufs(q)
 
-    samples_us = [t * 1000.0 for t in time_kernel(lambda: _launch_bwd(q, k, v, o, lse, do, causal))]
+    samples_us = [
+        t * 1000.0 for t in time_kernel(lambda: _launch_bwd(q, k, v, o, lse, do, causal, cfg, bufs))
+    ]
+
     qa, ka, va = (x.clone().detach().requires_grad_(True) for x in (q, k, v))
-
-    def baseline() -> None:
-        F.scaled_dot_product_attention(qa, ka, va, is_causal=causal).backward(do)
-
-    baseline_us = [t * 1000.0 for t in time_kernel(baseline, grad_to_none=[qa, ka, va])]
+    o_sdpa = F.scaled_dot_product_attention(qa, ka, va, is_causal=causal)  # one forward, untimed
+    baseline_us = [
+        t * 1000.0
+        for t in time_kernel(
+            lambda: torch.autograd.grad(
+                (o_sdpa,), (qa, ka, va), grad_outputs=(do,), retain_graph=True
+            )
+        )
+    ]
     triton_p50 = sorted(samples_us)[len(samples_us) // 2]
     baseline_p50 = sorted(baseline_us)[len(baseline_us) // 2]
 
-    spec_shape = {"B": b, "H": h, "S": s, "D": d, "causal": causal}
-    spec = roofline_spec(spec_shape, dtype_name)
+    spec = roofline_spec({"B": b, "H": h, "S": s, "D": d, "causal": causal}, dtype_name)
 
     return assemble_result(
         kernel_name="attention_bwd",
@@ -343,7 +354,7 @@ def run(cell: dict[str, Any], config: dict[str, int] | None = None) -> Result:
         layout=None,
         shape={"B": b, "H": h, "S": s, "D": d, "h_kv": h_kv, "causal": causal},
         source_hash=SOURCE_HASH,
-        autotune_config=dict(config or CONFIG),
+        autotune_config=cfg,
         samples_us=samples_us,
         machine=torch_machine(),
         flops=spec["flops"] if spec else None,

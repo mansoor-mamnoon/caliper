@@ -2,11 +2,12 @@
 ``F.scaled_dot_product_attention`` (SDPA) baseline.
 
 One Triton program per (batch, head, query block), streaming K/V blocks with
-the online-softmax running max / sum (FlashAttention-2 shape). Supports a
+the online-softmax running max / sum (FlashAttention-2 shape -- this kernel
+follows that structure, it is not copied from any upstream file). Supports a
 causal mask and grouped-query attention (``h_kv`` < ``h`` query heads share a
 K/V head); head dim 64 or 128; bf16 / fp16 / fp32. Both the kernel and the
-baseline run through :func:`caliper.live_timing_ms`; see
-``caliper.corpus._common`` for why.
+baseline (forward only, on the same expanded K/V) run through
+:func:`caliper.live_timing_ms`; see ``caliper.corpus._common`` for why.
 
 Importable without Triton or PyTorch; :func:`run` needs both, plus a CUDA
 device.
@@ -19,8 +20,9 @@ from typing import Any
 from caliper import Result
 from caliper.corpus._common import (
     assemble_result,
+    attention_dims,
+    attention_torch_dtype,
     content_hash,
-    dim,
     require_live_deps,
     roofline_spec_for,
     time_kernel,
@@ -36,6 +38,7 @@ except ImportError:  # pragma: no cover - triton not installed on the dev box
     TRITON_AVAILABLE = False
 
 __all__ = [
+    "CONFIG",
     "KERNEL_KEY",
     "SOURCE_HASH",
     "check_numerics",
@@ -48,10 +51,10 @@ __all__ = [
 KERNEL_KEY = "corpus:attention_fwd"
 SOURCE_HASH = content_hash(__file__)
 
-#: (BLOCK_M, BLOCK_N) query/key tile; a single entry -- attention autotuning is
-#: out of scope for the corpus (gemm carries the autotune contract).
+#: (BLOCK_M, BLOCK_N) query/key tile. A single default -- attention autotuning
+#: is out of scope for the corpus (gemm carries the autotune contract) -- but a
+#: caller's ``run(cell, config)`` override is applied and recorded.
 CONFIG = {"BLOCK_M": 64, "BLOCK_N": 64}
-_TORCH_DTYPES = ("bf16", "fp16", "fp32")
 
 if TRITON_AVAILABLE:
 
@@ -119,7 +122,7 @@ if TRITON_AVAILABLE:
                 mask=n_idx[None, :] < n_ctx,
                 other=0.0,
             ).to(tl.float32)
-            qk = tl.dot(q, k) * sm_scale
+            qk = tl.dot(q, k, allow_tf32=False) * sm_scale
             qk += tl.where(n_idx[None, :] < n_ctx, 0.0, float("-inf"))
             if CAUSAL:
                 qk += tl.where(offs_m[:, None] >= n_idx[None, :], 0.0, float("-inf"))
@@ -134,7 +137,7 @@ if TRITON_AVAILABLE:
                 mask=n_idx[:, None] < n_ctx,
                 other=0.0,
             ).to(tl.float32)
-            acc += tl.dot(p, v)
+            acc += tl.dot(p, v, allow_tf32=False)
             m_i = m_ij
 
         acc = acc / l_i[:, None]
@@ -159,24 +162,12 @@ def roofline_spec(shape: dict[str, Any], dtype: str) -> dict[str, Any] | None:
     return roofline_spec_for(KERNEL_KEY, shape, dtype)
 
 
-def _dims(cell: dict[str, Any]) -> tuple[int, int, int, int, int, bool]:
-    """``(b, h, s, d, h_kv, causal)`` from a cell. ``h_kv`` defaults to ``h``
-    (plain multi-head); ``causal`` defaults to ``False``."""
-    shape = cell["shape"]
-    b, h, s, d = (
-        dim(shape, "b", "B"),
-        dim(shape, "h", "H"),
-        dim(shape, "s", "S"),
-        dim(shape, "d", "D"),
-    )
-    h_kv = int(cell.get("h_kv") or shape.get("h_kv") or h)
-    if h % h_kv != 0:
-        raise ValueError(f"h={h} must be a multiple of h_kv={h_kv}")
-    causal = bool(cell.get("causal") or shape.get("causal") or False)
-    return b, h, s, d, h_kv, causal
+def _resolve(config: dict[str, int] | None) -> dict[str, int]:
+    return {**CONFIG, **(config or {})}
 
 
 def _make_qkv(b: int, h: int, s: int, d: int, h_kv: int, torch_dtype: Any) -> tuple[Any, Any, Any]:
+    """Random Q ``(b, h, s, d)`` and K/V ``(b, h_kv, s, d)`` on the device."""
     import torch
 
     q = torch.randn((b, h, s, d), device="cuda", dtype=torch_dtype)
@@ -185,18 +176,20 @@ def _make_qkv(b: int, h: int, s: int, d: int, h_kv: int, torch_dtype: Any) -> tu
     return q, k, v
 
 
-def _sdpa_baseline(q: Any, k: Any, v: Any, causal: bool) -> Any:
-    """``F.scaled_dot_product_attention`` with K/V expanded to the query head
-    count (version-independent GQA)."""
+def _expand(k: Any, v: Any, q_heads: int) -> tuple[Any, Any]:
+    """K/V repeated to ``q_heads`` heads (version-independent GQA), materialised
+    once so it is not redone inside a timed loop."""
+    group = q_heads // k.shape[1]
+    return k.repeat_interleave(group, dim=1), v.repeat_interleave(group, dim=1)
+
+
+def _sdpa(q: Any, k_full: Any, v_full: Any, causal: bool) -> Any:
     import torch.nn.functional as F
 
-    group = q.shape[1] // k.shape[1]
-    k_full = k.repeat_interleave(group, dim=1)
-    v_full = v.repeat_interleave(group, dim=1)
     return F.scaled_dot_product_attention(q, k_full, v_full, is_causal=causal)
 
 
-def _launch_triton(q: Any, k: Any, v: Any, causal: bool) -> Any:
+def _launch_triton(q: Any, k: Any, v: Any, causal: bool, cfg: dict[str, int]) -> Any:
     import torch
 
     b, h, s, d = q.shape
@@ -204,7 +197,7 @@ def _launch_triton(q: Any, k: Any, v: Any, causal: bool) -> Any:
     out = torch.empty_like(q)
     lse = torch.empty((b * h, s), device="cuda", dtype=torch.float32)
     sm_scale = 1.0 / (d**0.5)
-    block_m, block_n = CONFIG["BLOCK_M"], CONFIG["BLOCK_N"]
+    block_m, block_n = cfg["BLOCK_M"], cfg["BLOCK_N"]
     grid = (triton.cdiv(s, block_m), b * h)
     assert kernel is not None
     kernel[grid](
@@ -241,17 +234,6 @@ def _launch_triton(q: Any, k: Any, v: Any, causal: bool) -> Any:
     return out
 
 
-def _torch_dtype(dtype_name: str) -> Any:
-    import torch
-
-    if dtype_name not in _TORCH_DTYPES:
-        raise NotImplementedError(
-            f"corpus:attention_fwd supports {_TORCH_DTYPES}; {dtype_name!r} "
-            "(e.g. the fp8 path for L4) is a follow-up."
-        )
-    return {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[dtype_name]
-
-
 def check_numerics(cell: dict[str, Any], config: dict[str, int] | None = None) -> dict[str, Any]:
     """Run the Triton kernel and the SDPA baseline once (untimed) and compare.
     Returns ``{"max_abs_err", "max_rel_err", "allclose"}``; the DoD's
@@ -259,41 +241,41 @@ def check_numerics(cell: dict[str, Any], config: dict[str, int] | None = None) -
     require_live_deps("attention_fwd")
     import torch
 
-    b, h, s, d, h_kv, causal = _dims(cell)
-    torch_dtype = _torch_dtype(cell.get("dtype", "bf16"))
+    b, h, s, d, h_kv, causal = attention_dims(cell)
+    torch_dtype = attention_torch_dtype(cell.get("dtype", "bf16"))
     q, k, v = _make_qkv(b, h, s, d, h_kv, torch_dtype)
+    k_full, v_full = _expand(k, v, h)
 
-    got = _launch_triton(q, k, v, causal).to(torch.float32)
-    want = _sdpa_baseline(q, k, v, causal).to(torch.float32)
+    got = _launch_triton(q, k, v, causal, _resolve(config)).to(torch.float32)
+    want = _sdpa(q, k_full, v_full, causal).to(torch.float32)
     abs_err = (got - want).abs()
-    max_abs = float(abs_err.max())
-    max_rel = float((abs_err / want.abs().clamp_min(1e-6)).max())
     tol = 3e-3 if torch_dtype == torch.float32 else 2e-2
     return {
-        "max_abs_err": max_abs,
-        "max_rel_err": max_rel,
+        "max_abs_err": float(abs_err.max()),
+        "max_rel_err": float((abs_err / want.abs().clamp_min(1e-6)).max()),
         "allclose": torch.allclose(got, want, atol=tol, rtol=tol),
     }
 
 
 def run(cell: dict[str, Any], config: dict[str, int] | None = None) -> Result:
     """Time this attention forward at ``cell``'s shape/dtype (``cell`` may also
-    carry ``causal`` / ``h_kv``), against the SDPA baseline. Needs Triton,
-    PyTorch, and a CUDA device."""
+    carry ``causal`` / ``h_kv``), against the SDPA baseline on the same
+    expanded K/V. Needs Triton, PyTorch, and a CUDA device."""
     require_live_deps("attention_fwd")
 
-    b, h, s, d, h_kv, causal = _dims(cell)
+    b, h, s, d, h_kv, causal = attention_dims(cell)
     dtype_name = cell.get("dtype", "bf16")
-    torch_dtype = _torch_dtype(dtype_name)
+    torch_dtype = attention_torch_dtype(dtype_name)
+    cfg = _resolve(config)
     q, k, v = _make_qkv(b, h, s, d, h_kv, torch_dtype)
+    k_full, v_full = _expand(k, v, h)  # once, outside the timed loop
 
-    samples_us = [t * 1000.0 for t in time_kernel(lambda: _launch_triton(q, k, v, causal))]
-    baseline_us = [t * 1000.0 for t in time_kernel(lambda: _sdpa_baseline(q, k, v, causal))]
+    samples_us = [t * 1000.0 for t in time_kernel(lambda: _launch_triton(q, k, v, causal, cfg))]
+    baseline_us = [t * 1000.0 for t in time_kernel(lambda: _sdpa(q, k_full, v_full, causal))]
     triton_p50 = sorted(samples_us)[len(samples_us) // 2]
     baseline_p50 = sorted(baseline_us)[len(baseline_us) // 2]
 
-    spec_shape = {"B": b, "H": h, "S": s, "D": d, "causal": causal}
-    spec = roofline_spec(spec_shape, dtype_name)
+    spec = roofline_spec({"B": b, "H": h, "S": s, "D": d, "causal": causal}, dtype_name)
 
     return assemble_result(
         kernel_name="attention_fwd",
@@ -302,7 +284,7 @@ def run(cell: dict[str, Any], config: dict[str, int] | None = None) -> Result:
         layout=None,
         shape={"B": b, "H": h, "S": s, "D": d, "h_kv": h_kv, "causal": causal},
         source_hash=SOURCE_HASH,
-        autotune_config=dict(config or CONFIG),
+        autotune_config=cfg,
         samples_us=samples_us,
         machine=torch_machine(),
         flops=spec["flops"] if spec else None,

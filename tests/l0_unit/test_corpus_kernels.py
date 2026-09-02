@@ -72,6 +72,8 @@ def test_kernel_module_imports_without_triton(mod: Any) -> None:
     # dev box has no triton); the guard flag must agree.
     assert mod.TRITON_AVAILABLE is False
     assert mod.kernel is None
+    if mod is attention_bwd:
+        assert mod._preprocess is None  # the second jit fn is guarded too
 
 
 @pytest.mark.parametrize("mod", KERNELS)
@@ -89,6 +91,33 @@ def test_run_raises_cleanly_without_live_deps(mod: Any) -> None:
 def test_attention_check_numerics_raises_cleanly_without_live_deps(mod: Any) -> None:
     with pytest.raises(NotImplementedError, match="run"):
         mod.check_numerics({"shape": _shape_for(mod), "dtype": "bf16"})
+
+
+# -- attention_dims: the casing bridge + GQA validation, off-device --------
+
+
+def test_attention_dims_bridges_lowercase_sweep_and_uppercase_direct_keys() -> None:
+    lower = _common.attention_dims({"shape": {"kind": "attn", "b": 2, "h": 8, "s": 1024, "d": 64}})
+    upper = _common.attention_dims({"shape": {"B": 2, "H": 8, "S": 1024, "D": 64}})
+    assert lower == upper == _common.AttentionDims(2, 8, 1024, 64, h_kv=8, causal=False)
+
+
+def test_attention_dims_reads_causal_and_h_kv_and_lets_the_cell_win() -> None:
+    d = _common.attention_dims(
+        {"shape": {"B": 1, "H": 8, "S": 16, "D": 16, "causal": True}, "causal": False, "h_kv": 2}
+    )
+    assert d.h_kv == 2 and d.causal is False  # cell-level overrides shape-level
+
+
+@pytest.mark.parametrize("h_kv", [0, 3, 5])
+def test_attention_dims_rejects_a_bad_h_kv(h_kv: int) -> None:
+    with pytest.raises(ValueError, match="multiple of h_kv"):
+        _common.attention_dims({"shape": {"B": 1, "H": 8, "S": 16, "D": 16}, "h_kv": h_kv})
+
+
+def test_attention_torch_dtype_rejects_fp8_before_importing_torch() -> None:
+    with pytest.raises(NotImplementedError, match="fp8"):
+        _common.attention_torch_dtype("fp8_e4m3")
 
 
 # -- roofline_spec: pure math, hand-computable -----------------------------

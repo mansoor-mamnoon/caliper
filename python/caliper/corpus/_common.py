@@ -27,8 +27,11 @@ from caliper.api import live_timing_ms
 
 __all__ = [
     "TRITON_PIN",
+    "AttentionDims",
     "TritonPin",
     "assemble_result",
+    "attention_dims",
+    "attention_torch_dtype",
     "content_hash",
     "dim",
     "has_module",
@@ -37,6 +40,9 @@ __all__ = [
     "time_kernel",
     "torch_machine",
 ]
+
+#: dtypes the attention corpus kernels (and their SDPA baselines) accept.
+ATTENTION_DTYPES = ("bf16", "fp16", "fp32")
 
 
 class TritonPin(NamedTuple):
@@ -86,6 +92,60 @@ def roofline_spec_for(kernel_key: str, shape: dict[str, Any], dtype: str) -> dic
     missing. Pure; no GPU needed."""
     spec_json = _core.corpus_roofline_spec(kernel_key, json.dumps(shape), dtype)
     return dict(json.loads(spec_json)) if spec_json is not None else None
+
+
+class AttentionDims(NamedTuple):
+    """The problem an attention corpus kernel is being asked to run."""
+
+    b: int
+    h: int
+    s: int
+    d: int
+    h_kv: int  # K/V heads (< h for grouped-query attention); defaults to h
+    causal: bool
+
+
+def _cell_get(cell: dict[str, Any], key: str, default: Any) -> Any:
+    """``cell[key]`` or ``cell["shape"][key]`` (a cell may carry attention
+    knobs at either level), falling back to ``default`` only when neither is
+    set -- an explicit ``False`` / ``0`` is honoured."""
+    for src in (cell, cell.get("shape", {})):
+        if key in src:
+            return src[key]
+    return default
+
+
+def attention_dims(cell: dict[str, Any]) -> AttentionDims:
+    """``(b, h, s, d, h_kv, causal)`` from a cell. Dimensions come from
+    ``cell["shape"]`` under either case (``"s"`` from a ``sweep`` cell, ``"S"``
+    from a direct call, via :func:`dim`); ``h_kv`` / ``causal`` come from the
+    cell or its shape and default to ``h`` (plain multi-head) / ``False``."""
+    shape = cell["shape"]
+    b, h, s, d = (
+        dim(shape, "b", "B"),
+        dim(shape, "h", "H"),
+        dim(shape, "s", "S"),
+        dim(shape, "d", "D"),
+    )
+    h_kv = int(_cell_get(cell, "h_kv", h))
+    if h_kv <= 0 or h % h_kv != 0:
+        raise ValueError(f"h={h} must be a positive multiple of h_kv={h_kv}")
+    return AttentionDims(b, h, s, d, h_kv, bool(_cell_get(cell, "causal", False)))
+
+
+def attention_torch_dtype(dtype_name: str) -> Any:
+    """The ``torch`` dtype for an attention corpus kernel. Raises
+    ``NotImplementedError`` for anything outside :data:`ATTENTION_DTYPES` (the
+    fp8 path for L4 is a follow-up), rather than silently downcasting -- and it
+    does so before importing torch, so the rejection is testable off-GPU."""
+    if dtype_name not in ATTENTION_DTYPES:
+        raise NotImplementedError(
+            f"the attention corpus kernels support {ATTENTION_DTYPES}; "
+            f"{dtype_name!r} (e.g. the fp8 path for L4) is a follow-up."
+        )
+    import torch
+
+    return {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[dtype_name]
 
 
 def require_live_deps(kernel_name: str) -> None:
