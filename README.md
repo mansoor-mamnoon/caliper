@@ -2,6 +2,10 @@
 
 **Measure GPU kernels correctly.**
 
+[![CI](https://github.com/mansoor-mamnoon/caliper/actions/workflows/ci-cpu.yml/badge.svg)](https://github.com/mansoor-mamnoon/caliper/actions/workflows/ci-cpu.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mansoor-mamnoon/caliper/blob/main/notebooks/quickstart.ipynb)
+
 Timing a GPU kernel looks like a one-liner and almost never is. The common
 approaches get several things subtly wrong: they don't warm up to a steady
 clock, they flush the wrong amount of cache (or none), they don't notice the
@@ -90,8 +94,33 @@ with reproduction scripts -- see
 | `python/caliper/corpus` | Python + Triton | The reference kernel corpus (`gemm`, `rmsnorm`, `softmax`, `attention_fwd`, `attention_bwd`) and its vendor baselines -- runs live on any CUDA host, independent of the (still-stubbed) Rust launcher. See [`docs/corpus.md`](docs/corpus.md). |
 | `crates/caliper-gpu/kernels` *(Colab)* | CUDA C++ | The on-device oracle kernels O1-O7. |
 
-The full interface, data schema, and validation strategy are written up in
-[`docs/plan.md`](docs/plan.md).
+Full reference: [`docs/api.md`](docs/api.md) (every public symbol + the record
+schema), [`docs/cli.md`](docs/cli.md) (every command + exit codes). The design
+doc is [`docs/plan.md`](docs/plan.md).
+
+## 30 seconds
+
+```bash
+pip install -e ".[dev]"           # from a clone (not on PyPI yet); builds the Rust core
+caliper doctor                    # is this box fit to benchmark?
+caliper bench k --recording session.jsonl --json   # measure (replay path)
+```
+
+```python
+from caliper import bench, do_bench
+
+r = bench(
+    "corpus:gemm",
+    recording=open("session.jsonl").read(),
+    shape={"M": 4096, "N": 4096, "K": 4096},
+    dtype="bf16",
+)
+print(r.p50_us, r.roofline_pct, r.flags)
+
+ms = do_bench(fn, quantiles=[0.5, 0.2, 0.8])  # a Triton script only swaps the import
+```
+
+No GPU? [**Open the quickstart in Colab.**](https://colab.research.google.com/github/mansoor-mamnoon/caliper/blob/main/notebooks/quickstart.ipynb)
 
 ## Interface
 
@@ -178,7 +207,26 @@ make typecheck    # mypy
 Tests are tagged by what they need: `l0` (pure, no GPU), `l1` (against recorded
 device responses, no GPU), and `l2`/`l3`/`l4`/`l6` (require a real GPU). CI runs
 the Rust suite and the `l0`/`l1` Python tests on every push; the GPU tiers run
-on Colab. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the push -> Colab -> PR loop.
+on Colab. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the push -> Colab -> PR loop,
+plus how to add an architecture, a corpus kernel, or a device backend.
+
+## Submit your GPU's numbers
+
+The roofline needs real per-SKU data, and the corpus needs runs on more than one
+card. If you have a GPU:
+
+```bash
+caliper selftest --full --json > selftest.json     # confirm the box is fit
+caliper sweep corpus.yaml --parquet rows.parquet   # or your own kernels
+caliper submit rows.parquet --out bundle/ --calibration <measured_us> <expected_us>
+caliper validate bundle/                            # must print OK
+```
+
+Then open a PR adding `bundle/` under `results/` in
+[`caliper-results`](results-repo/) -- the same `caliper validate` runs in the PR
+gate. Full instructions: [`results-repo/SUBMITTING.md`](results-repo/SUBMITTING.md).
+For a Tier-1 acceptance pass, work through
+[`docs/acceptance/manual-playbook.md`](docs/acceptance/manual-playbook.md).
 
 ## License
 

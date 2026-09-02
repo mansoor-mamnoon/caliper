@@ -315,3 +315,16 @@ tagged release onward.
   links, and what `caliper` does instead. `examples/misleads/` has the three
   runnable experiments (`fast_kernel`, `cold_warmup`, `l2_resident`);
   `make writeup-data` runs them into `docs/data/misleads.csv`.
+- Reference docs: `docs/api.md` (every public `caliper` symbol + the record /
+  Parquet-row schema), `docs/cli.md` (every subcommand, its flags, and the exit
+  codes), and `docs/acceptance/manual-playbook.md` (the 14-step L5 playbook,
+  split into Playbook A / B, with the report template).
+  `tests/l0_unit/test_docs_match_code.py` fails if a public symbol, a schema
+  field, or a CLI subcommand is undocumented. `CONTRIBUTING.md` gains an
+  "Extending caliper" section (add an architecture / a corpus kernel / a device
+  backend / run the playbook).
+- `notebooks/quickstart.ipynb` + an "Open in Colab" badge: install from source,
+  `caliper doctor`, a replay `caliper bench`, and a pure `roofline_spec` -- a
+  new reader runs it in a fresh Colab runtime with no local setup. The README
+  gains a badge row, a "30 seconds" block, and a "Submit your GPU's numbers"
+  section.
