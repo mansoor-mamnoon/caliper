@@ -48,4 +48,6 @@ writes the bundle onto a fresh branch there; push it and open the PR yourself.
 | `determinism repeat CoV ...% exceeds the ...% tolerance` | repeated measurements of one facet disagree past the tier's CoV bound (2% locked, 5% unlocked) |
 | `calibration GEMM p50 is ...% of expected` | the SKU calibration GEMM ran more than 8% off its expectation -- the clocks were probably not what the fingerprint says |
 | `fingerprint.sm_arch ... != manifest arch` / `row ... machine.sm_arch ...` | the bundle mixes architectures |
+| `manifest tier ... != the rows' tier` / `manifest kernels ...` | a hand-edited manifest that disagrees with the rows (the gate recomputes both) |
+| `row N: exact duplicate of an earlier row` | the same measurement appears twice in one bundle |
 | any `caliper validate` schema problem | a malformed record (bad percentile ordering, out-of-range occupancy, ...) |

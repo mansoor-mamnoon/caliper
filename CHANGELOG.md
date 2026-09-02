@@ -289,11 +289,17 @@ tagged release onward.
   builds it; with `--repo` a local `caliper-results` checkout and
   `--dry-run=false` the bundle lands on a fresh branch there.
 - `caliper validate` is now the shared results gate. A directory is read as a
-  bundle and checked by `caliper_core::submit::validate_bundle` --
-  per-row schema validity, the submission-strict extras (required fields,
-  `roofline_pct <= 1.05` rather than the schema's 1.5 recording clamp), and the
-  manifest / rows / fingerprint arch consistency plus the determinism and
-  calibration verdicts. Exposed as `caliper._core.submit_manifest` /
+  bundle and checked by `caliper_core::submit::validate_bundle` -- per-row
+  schema validity, the submission-strict extras (required fields,
+  `roofline_pct <= 1.05` rather than the schema's 1.5 recording clamp), the
+  manifest / rows / fingerprint arch consistency, a within-bundle
+  exact-duplicate row check, and the determinism (NFR-5 duration-banded CoV:
+  2% locked, 5% unlocked >=100us, 8% unlocked 10-100us) and calibration
+  (+/-8%) verdicts. The tier, kernel list, and those verdicts are
+  **recomputed from the bundled rows** -- a submitter-controlled manifest's
+  own `within_tolerance` booleans are not trusted. Cross-bundle dedupe (a PR
+  whose facet already exists under `results/`) is deferred to the
+  `caliper-results` CI. Exposed as `caliper._core.submit_manifest` /
   `validate_bundle`.
 - `results-repo/` -- the `caliper-results` scaffold: the
   `results/<arch>/<toolchain-hash>/` layout, `SUBMITTING.md`, a `schema/`

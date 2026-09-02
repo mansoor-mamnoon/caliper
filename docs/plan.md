@@ -587,7 +587,7 @@ Tier-1 archs must be all-PASS to release; Tier-2 archs are filed with triage not
 | 11 | Sweep + resume | `caliper sweep examples/mini.yaml --parquet s.parquet`; `kill` mid-run; rerun with `--resume` | resumes; final Parquet passes `caliper validate` | |
 | 12 | Compare catches regression | `caliper compare --baseline tests/testdata/base.parquet --candidate tests/testdata/slow.parquet --fail-on-regression` | exit 1; prints the slowdown **and** the spill delta | |
 | 13 | Submit dry-run | `caliper submit s.parquet --dry-run --out bundle/` | bundle has rows + fingerprint + calibration result + version; `caliper validate bundle/` passes | |
-| 14 | Negative validate | `caliper validate testdata/over_peak_row.parquet` etc. (4 bad fixtures) | each fails with a specific, correct message | |
+| 14 | Negative validate | `caliper validate tests/testdata/over_peak_row.parquet` etc. (4 bad fixtures: over-peak row + `bundle_missing_field/` + `bundle_nonreproducing/` + `bundle_slow_calibration/`) | each fails with a specific, correct message | |
 
 ### 3.8 Test artifacts & locations
 

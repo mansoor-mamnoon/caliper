@@ -18,6 +18,8 @@ jobs:
           python-version: "3.12"
 
       - name: Install caliper
+        # pin a released caliper-gpu here once it is on PyPI -- the pinned
+        # version is what pins the validation rules (see schema/README.md).
         run: pip install --quiet caliper-gpu
 
       - name: Validate every changed bundle
