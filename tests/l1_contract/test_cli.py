@@ -294,3 +294,54 @@ def test_compare_missing_file_exits_two(capsys: pytest.CaptureFixture[str]) -> N
     )
     assert code == 2
     assert "caliper compare:" in capsys.readouterr().err
+
+
+# --- submit + validate bundle -------------------------------------------------
+
+
+def test_submit_dry_run_writes_a_bundle_and_validate_accepts_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "bundle"
+    code = main(
+        [
+            "submit",
+            str(TESTDATA / "base.json"),
+            "--out",
+            str(out),
+            "--calibration",
+            "101",
+            "100",
+        ]
+    )
+    assert code == 0
+    text = capsys.readouterr().out
+    assert "2 row(s), 2 kernel(s), arch sm_80, locked tier" in text
+    assert (out / "manifest.json").exists()
+
+    assert main(["validate", str(out)]) == 0
+    assert "OK: bundle (2 row(s))" in capsys.readouterr().out
+
+
+def test_validate_a_bad_bundle_exits_one_with_the_reason(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(["validate", str(TESTDATA / "bundle_slow_calibration")])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "calibration GEMM p50 is 118.0% of expected" in out
+    assert "INVALID: bundle" in out
+
+
+def test_validate_a_directory_that_is_not_a_bundle_exits_two(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["validate", str(tmp_path)]) == 2
+    assert "not a bundle" in capsys.readouterr().err
+
+
+def test_submit_no_rows_exits_two(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    empty = tmp_path / "empty.json"
+    empty.write_text("[]")
+    assert main(["submit", str(empty)]) == 2
+    assert "no rows to submit" in capsys.readouterr().err

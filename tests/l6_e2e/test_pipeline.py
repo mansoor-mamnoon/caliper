@@ -1,10 +1,10 @@
 """L6 (Colab A100): the dataset pipeline end to end -- ``sweep`` -> ``validate``
--> ``compare`` on a tiny corpus matrix.
+-> ``compare`` -> ``submit --dry-run`` -> ``validate <bundle>`` on a tiny
+corpus matrix.
 
 Needs a CUDA device with Triton; skipped otherwise. The no-GPU coverage of each
 stage lives in ``tests/l0_unit`` / ``tests/l1_contract``; this test is the
-proof they compose. (``submit --dry-run`` joins this chain once ``caliper
-submit`` lands in W4D1.)
+proof they compose.
 """
 
 from __future__ import annotations
@@ -67,6 +67,10 @@ def test_sweep_then_validate_then_compare(tmp_path: Path) -> None:
     assert regressed["exit_code"] == 1
     assert regressed["summary"]["regressions"] == 1
 
+    # ... and the clean run bundles into something `caliper validate` accepts.
+    from caliper import submit
 
-def test_submit_dry_run_joins_the_chain_in_w4() -> None:
-    pytest.skip("caliper submit --dry-run lands in W4D1; pipeline extends then")
+    bundle = tmp_path / "bundle"
+    submit(base, out=bundle)
+    bundle_report = validate_records(bundle)
+    assert bundle_report["ok"], bundle_report["problems"]
