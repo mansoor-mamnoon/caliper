@@ -307,3 +307,11 @@ tagged release onward.
   validate` on each changed bundle. Fixtures
   `tests/testdata/{bundle_ok,bundle_missing_field,bundle_nonreproducing,bundle_slow_calibration}/`
   + `over_peak_row.json` (+ `build_bundles.py`) cover playbooks #13 and #14.
+- `docs/why-do_bench-misleads.md` -- the launch writeup ("Your Triton benchmark
+  is probably lying to you"): four ways a default `do_bench` call drops context
+  that changes the answer (per-launch event tax on short kernels, a fixed
+  warmup that misses the clock ramp, an L2-resident working set with no flush,
+  unlocked/unrecorded clocks), each with the mechanism, the upstream issue
+  links, and what `caliper` does instead. `examples/misleads/` has the three
+  runnable experiments (`fast_kernel`, `cold_warmup`, `l2_resident`);
+  `make writeup-data` runs them into `docs/data/misleads.csv`.

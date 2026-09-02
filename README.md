@@ -15,6 +15,10 @@ right by default, and reports enough context alongside each number
 (achieved vs. peak, register spills, occupancy, launch overhead, clock state)
 that you can tell whether to trust it.
 
+For a concrete walk through four ways a default `do_bench` call misleads --
+with reproduction scripts -- see
+[**Your Triton benchmark is probably lying to you**](docs/why-do_bench-misleads.md).
+
 > **Status: early development.** The measurement engine, result schema, roofline
 > and occupancy models, `ptxas` parsing, the sweep planner, the regression
 > `compare`, the `submit` bundle + validator, the `do_bench` shim, and the
@@ -65,7 +69,9 @@ that you can tell whether to trust it.
   validates on every PR -- the same gate `caliper validate <bundle>` runs
   locally.
 - **Is Triton-compatible** -- `caliper.do_bench` matches `triton.testing.do_bench`
-  argument for argument, so a script can swap the import.
+  argument for argument, so a script can swap the import; the failure modes of a
+  default `do_bench` call, and the reproduction scripts, are written up in
+  [`docs/why-do_bench-misleads.md`](docs/why-do_bench-misleads.md).
 - **Ships a reference kernel corpus** -- `gemm`, `rmsnorm`, `softmax`,
   `attention_fwd`, `attention_bwd`, each a Triton implementation pinned to a
   content hash plus a vendor baseline (cuBLAS / torch / SDPA), timed live on
