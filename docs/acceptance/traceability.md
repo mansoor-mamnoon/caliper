@@ -54,4 +54,9 @@ Run [`notebooks/acceptance.ipynb`](../../notebooks/acceptance.ipynb) on the
 target GPU (Playbook A) or the golden box (Playbook B). It writes
 `reports/<arch>-<host>-<date>.md` and `selftest-<arch>.json`; commit both and
 flip the row to the arch it passed on. A deviation is filed as an issue and
-noted in the report's *Deviations / triage* block.
+noted in the report's *Deviations / triage* block, then tracked to closure in
+[`triage.md`](triage.md). Tier-2 archs use the reduced bar in
+[`tier2.md`](tier2.md) and are not release-blocking.
+
+When every row here points at a passing test or a filled playbook step, the
+release checklist in [`../../RELEASING.md`](../../RELEASING.md) applies.
