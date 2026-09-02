@@ -1,0 +1,19 @@
+{
+  "caliper_version": "0.3.0",
+  "schema_version": "1",
+  "created_at": "2026-09-04T00:00:00Z",
+  "arch": "sm_80",
+  "toolchain_hash": "0b3c5f5b59c7ea892a86e82e03bd0f6d07c56bf9523e0baf584b17d32c7cbe33",
+  "n_rows": 2,
+  "kernels": [
+    "rmsnorm"
+  ],
+  "tier": "locked",
+  "calibration": {
+    "measured_p50_us": 101.0,
+    "expected_p50_us": 100.0,
+    "ratio": 1.01,
+    "within_tolerance": true
+  },
+  "determinism": null
+}

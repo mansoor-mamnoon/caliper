@@ -1,0 +1,8 @@
+{
+  "gpu_name": "NVIDIA A100-SXM4-40GB",
+  "sm_arch": "sm_80",
+  "vram_mib": 40960,
+  "sm_count": 108,
+  "cuda_runtime": "12.4",
+  "driver": "550.90.07"
+}

@@ -1,0 +1,53 @@
+[
+  {
+    "schema_version": "1",
+    "measured_at": "2026-09-01T12:00:00Z",
+    "kernel": {
+      "name": "gemm",
+      "impl": "triton",
+      "dtype": "bf16",
+      "shape": {
+        "M": 4096,
+        "N": 4096,
+        "K": 4096
+      },
+      "layout": "row",
+      "autotune_config": {
+        "BLOCK_M": 128,
+        "BLOCK_N": 128,
+        "BLOCK_K": 32
+      }
+    },
+    "timing": {
+      "p10_us": 241.0,
+      "p50_us": 243.2,
+      "p90_us": 250.1,
+      "mad_us": 1.4,
+      "mean_us": 244.0,
+      "min_us": 240.5,
+      "max_us": 255.0,
+      "n_samples": 300
+    },
+    "ptxas": {
+      "regs_per_thread": 168,
+      "spill_loads_bytes": 0,
+      "spill_stores_bytes": 0
+    },
+    "occupancy": {
+      "theoretical": 0.25,
+      "achieved": 0.247
+    },
+    "machine": {
+      "gpu_name": "NVIDIA A100-SXM4-40GB",
+      "sm_arch": "sm_80",
+      "vram_mib": 40960,
+      "sm_count": 108,
+      "cuda_runtime": "12.4",
+      "driver": "550.90.07"
+    },
+    "flags": [],
+    "roofline": {
+      "roofline_pct": 1.7
+    }
+  }
+]
