@@ -1,4 +1,4 @@
-.PHONY: install develop sync rust-fmt rust-lint rust-test lint fmt typecheck test check build clean
+.PHONY: install develop sync rust-fmt rust-lint rust-test lint fmt typecheck test check build clean writeup-data
 
 install:
 	pip install -e ".[dev]"
@@ -43,6 +43,10 @@ check: rust-fmt rust-lint rust-test lint typecheck test
 
 build:
 	maturin build --release
+
+# Regenerate docs/data/misleads.csv (the "do_bench misleads" writeup). CUDA host.
+writeup-data:
+	python examples/misleads/run_all.py
 
 clean:
 	rm -rf target build dist .pytest_cache .mypy_cache .ruff_cache htmlcov coverage.xml
