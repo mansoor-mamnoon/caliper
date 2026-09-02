@@ -128,6 +128,17 @@ def test_fingerprint_from_a_recording(capsys: pytest.CaptureFixture[str]) -> Non
     assert machine["sm_arch"] == "sm_89"
 
 
+def test_fingerprint_equals_the_bench_result_machine_block() -> None:
+    # FR-19: `caliper fingerprint` output equals the `machine` block embedded in
+    # a `bench` Result taken from the same session.
+    from caliper import api
+
+    rec = (BENCH / "happy.jsonl").read_text()
+    result_machine = api.bench("k", recording=rec, batches=40).machine
+    standalone = api.fingerprint(recording=rec)
+    assert dict(result_machine) == standalone
+
+
 def test_fingerprint_from_env_without_a_gpu_exits_two() -> None:
     assert main(["fingerprint"]) == 2
 
