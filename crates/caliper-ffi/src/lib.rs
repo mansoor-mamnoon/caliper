@@ -240,7 +240,11 @@ fn corpus_roofline_spec(
 /// floor_pct?}` object (``{}`` for the defaults). Raises ``ValueError`` if any
 /// input is not the expected JSON shape.
 #[pyfunction]
-fn compare_datasets(baseline_json: &str, candidate_json: &str, opts_json: &str) -> PyResult<String> {
+fn compare_datasets(
+    baseline_json: &str,
+    candidate_json: &str,
+    opts_json: &str,
+) -> PyResult<String> {
     caliper_core::thresholds::compare_json(baseline_json, candidate_json, opts_json)
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
