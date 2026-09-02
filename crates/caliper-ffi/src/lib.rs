@@ -233,6 +233,18 @@ fn corpus_roofline_spec(
     }
 }
 
+// --- compare / thresholds ----------------------------------------------------
+
+/// Compare two datasets (JSON arrays of records) and return the regression
+/// report as JSON. ``opts_json`` is a `{arch?, threshold_pct?, sigma_mult?,
+/// floor_pct?}` object (``{}`` for the defaults). Raises ``ValueError`` if any
+/// input is not the expected JSON shape.
+#[pyfunction]
+fn compare_datasets(baseline_json: &str, candidate_json: &str, opts_json: &str) -> PyResult<String> {
+    caliper_core::thresholds::compare_json(baseline_json, candidate_json, opts_json)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 // --- corpus targets ------------------------------------------------------
 
 /// The kernel key for a `corpus:*` target, or `None` if it is not a known
@@ -520,6 +532,7 @@ fn _core(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(corpus_roofline_spec, module)?)?;
     module.add_function(wrap_pyfunction!(resolve_corpus_target, module)?)?;
     module.add_function(wrap_pyfunction!(corpus_targets, module)?)?;
+    module.add_function(wrap_pyfunction!(compare_datasets, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_replay, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_render_replay, module)?)?;
     module.add_function(wrap_pyfunction!(doctor_from_env, module)?)?;
