@@ -1,0 +1,144 @@
+name: release
+
+# Cutting a release: push a tag `vX.Y.Z` (see RELEASING.md). This builds the
+# sdist + Linux wheels, publishes to Test PyPI, then -- after a manual approval
+# on the `pypi` environment -- to PyPI, and opens a GitHub Release with the
+# acceptance evidence attached. `workflow_dispatch` runs the build + Test PyPI
+# path only, for a rehearsal.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build sdist + wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tag matches the crate version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "crate=$crate tag=$tag"
+          test "$crate" = "$tag" || {
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $crate"
+            exit 1
+          }
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Build wheels (manylinux, cp310-cp312)
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist --interpreter python3.10 python3.11 python3.12
+          manylinux: auto
+
+      - name: Check the artifacts
+        run: |
+          python -m pip install --upgrade twine
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  test-pypi:
+    name: publish to Test PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: test-pypi
+      url: https://test.pypi.org/project/caliper-gpu/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    name: publish to PyPI
+    needs: test-pypi
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/caliper-gpu/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub Release
+    needs: pypi
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Extract this version's changelog section
+        run: |
+          python - "$GITHUB_REF_NAME" > RELEASE_NOTES.md <<'PY'
+          import re, sys, pathlib
+          tag = sys.argv[1].lstrip("v")
+          text = pathlib.Path("CHANGELOG.md").read_text()
+          m = re.search(rf"^## \[{re.escape(tag)}\].*?$(.*?)(?=^## \[|\Z)", text, re.M | re.S)
+          sys.stdout.write((m.group(1).strip() if m else f"See CHANGELOG.md for {tag}.") + "\n")
+          PY
+          cat RELEASE_NOTES.md
+
+      - name: Collect acceptance evidence
+        run: |
+          mkdir -p release-assets
+          cp dist/* release-assets/ || true
+          cp docs/acceptance/reports/selftest-*.json release-assets/ 2>/dev/null || true
+          cp docs/acceptance/reports/*ncu*.md release-assets/ 2>/dev/null || true
+          cp docs/why-do_bench-misleads.md release-assets/ 2>/dev/null || true
+          ls -la release-assets
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: release-assets/*
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: false
