@@ -1,9 +1,9 @@
 """Command-line entry point for caliper.
 
 Wired up so far: ``bench`` (recorded-session path), ``doctor``, ``fingerprint``,
-``selftest``, ``validate``, ``sweep``, ``compare``, plus ``--version`` /
-``--help``. Most commands take ``--json`` for machine-readable output. The
-submit command is added as its supporting code lands.
+``selftest``, ``validate``, ``sweep``, ``compare``, ``submit``, plus
+``--version`` / ``--help``. Most commands take ``--json`` for machine-readable
+output.
 
 Exit codes: 0 success; 1 "not fit" (``doctor``) / "FAIL" (``selftest``) /
 "regression" (``compare --fail-on-regression``) / "INVALID" (``validate``);
@@ -63,9 +63,27 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_st.add_argument("--json", action="store_true", help="print the Appendix-E report as JSON")
 
-    p_val = sub.add_parser("validate", help="check a results file against the schema")
-    p_val.add_argument("path", metavar="FILE", help="a .json / .jsonl / .parquet results file")
+    p_val = sub.add_parser("validate", help="check a results file or a submit bundle")
+    p_val.add_argument(
+        "path", metavar="PATH", help="a .json / .jsonl / .parquet file, or a bundle directory"
+    )
     p_val.add_argument("--json", action="store_true", help="print the report as JSON")
+
+    p_sub = sub.add_parser("submit", help="build a caliper-results submission bundle")
+    p_sub.add_argument("paths", metavar="FILE", nargs="+", help="one or more results files")
+    p_sub.add_argument("--out", metavar="DIR", help="write the bundle here")
+    p_sub.add_argument("--repo", metavar="DIR", help="a local caliper-results checkout")
+    p_sub.add_argument(
+        "--dry-run", action="store_true", help="build the bundle only; never touch a repo"
+    )
+    p_sub.add_argument(
+        "--calibration",
+        nargs=2,
+        type=float,
+        metavar=("MEASURED_US", "EXPECTED_US"),
+        help="the SKU calibration GEMM p50 and its expectation",
+    )
+    p_sub.add_argument("--json", action="store_true", help="print the bundle summary as JSON")
 
     p_cmp = sub.add_parser("compare", help="diff two results files for regressions")
     p_cmp.add_argument("--baseline", metavar="FILE", required=True, help="the reference dataset")
@@ -211,10 +229,47 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     else:
         for entry in report["problems"]:
             for problem in entry["problems"]:
-                print(f"  row {entry['row']}: {problem}")
+                where = "bundle" if entry["row"] is None else f"row {entry['row']}"
+                print(f"  {where}: {problem}")
         state = "OK" if report["ok"] else "INVALID"
-        print(f"{state}: {report['n']} record(s), {report['n_invalid']} invalid")
+        n = report["n"]
+        subject = f"bundle ({n} row(s))" if "bundle" in report else f"{n} record(s)"
+        print(f"{state}: {subject}, {report['n_invalid']} problem(s)")
     return 0 if report["ok"] else 1
+
+
+def _cmd_submit(args: argparse.Namespace) -> int:
+    try:
+        result = api.submit(
+            args.paths,
+            out=args.out,
+            repo=args.repo,
+            dry_run=args.dry_run or args.repo is None,
+            calibration=tuple(args.calibration) if args.calibration else None,
+        )
+    except (ValueError, OSError, ImportError, NotImplementedError) as exc:
+        print(f"caliper submit: {exc}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        m = result["manifest"]
+        print(
+            f"bundle: {result['n_rows']} row(s), {len(m['kernels'])} kernel(s), "
+            f"arch {m['arch']}, {m['tier']} tier"
+        )
+        if m.get("determinism"):
+            d = m["determinism"]
+            print(f"  determinism: {d['n_repeats']} repeats, CoV {d['cov'] * 100:.1f}%")
+        if m.get("calibration"):
+            c = m["calibration"]
+            print(f"  calibration: {c['ratio'] * 100:.1f}% of expected")
+        if result["out"]:
+            print(f"  written to {result['out']}/ (manifest.json, rows.parquet, fingerprint.json)")
+        if result["branch"]:
+            print(f"  committed to branch {result['branch']}; push it and open a PR")
+    return 0
 
 
 def _fmt_deltas(d: dict[str, object]) -> list[str]:
@@ -341,6 +396,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_validate(args)
     if args.command == "compare":
         return _cmd_compare(args)
+    if args.command == "submit":
+        return _cmd_submit(args)
     if args.command == "sweep":
         return _cmd_sweep(args)
     parser.print_help(sys.stderr)  # pragma: no cover - argparse rejects unknowns first

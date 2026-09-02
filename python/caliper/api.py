@@ -10,6 +10,7 @@ runs on a CUDA host and is not yet implemented.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ __all__ = [
     "fingerprint_check",
     "live_timing_ms",
     "selftest",
+    "submit",
     "sweep",
     "toolchain",
     "validate_records",
@@ -399,15 +401,66 @@ def _load_records(path: str | Path) -> list[dict[str, Any]]:
     return loaded if isinstance(loaded, list) else [loaded]
 
 
+_BUNDLE_ROW_NAMES = ("rows.parquet", "rows.jsonl", "rows.json")
+
+
+def _bundle_paths(d: Path) -> tuple[Path, Path, Path]:
+    """``(manifest.json, rows.*, fingerprint.json)`` inside a bundle dir, or a
+    ``ValueError`` naming what is missing."""
+    manifest = d / "manifest.json"
+    fingerprint = d / "fingerprint.json"
+    rows = next((d / n for n in _BUNDLE_ROW_NAMES if (d / n).exists()), None)
+    missing = [
+        name
+        for name, ok in (
+            ("manifest.json", manifest.exists()),
+            ("rows.parquet / rows.jsonl", rows is not None),
+            ("fingerprint.json", fingerprint.exists()),
+        )
+        if not ok
+    ]
+    if missing:
+        raise ValueError(f"{d} is not a bundle: missing {', '.join(missing)}")
+    assert rows is not None
+    return manifest, rows, fingerprint
+
+
+def _validate_bundle(d: Path) -> dict[str, Any]:
+    manifest, rows_path, fingerprint = _bundle_paths(d)
+    rows = _load_records(rows_path)
+    problems = list(
+        _core.validate_bundle(
+            manifest.read_text(),
+            json.dumps(rows),
+            fingerprint.read_text(),
+        )
+    )
+    return {
+        "bundle": str(d),
+        "n": len(rows),
+        "n_invalid": len(problems),
+        "problems": [{"row": None, "problems": problems}] if problems else [],
+        "ok": not problems,
+    }
+
+
 def validate_records(path: str | Path) -> dict[str, Any]:
-    """Validate every record in a `.json` / `.jsonl` / `.parquet` file against
-    the result schema.
+    """Validate a results file *or* a submit bundle.
 
-    Returns ``{"n": int, "n_invalid": int, "problems": [{"row": i, "problems":
-    [...]}], "ok": bool}``.
+    A ``.json`` / ``.jsonl`` / ``.parquet`` file: every record is checked
+    against the result schema. A directory: it is read as a bundle
+    (``manifest.json`` + ``rows.*`` + ``fingerprint.json``) and run through the
+    shared bundle gate (schema + submission-strict fields + roofline bound +
+    determinism / calibration / arch consistency).
+
+    Returns ``{"n": int, "n_invalid": int, "problems": [...], "ok": bool}``
+    (bundles also carry ``"bundle": <path>``).
     """
-    records = _load_records(path)
+    p = Path(path)
+    if p.is_dir():
+        return _validate_bundle(p)
 
+    records = _load_records(p)
     problems: list[dict[str, Any]] = []
     for i, rec in enumerate(records):
         try:
@@ -423,6 +476,111 @@ def validate_records(path: str | Path) -> dict[str, Any]:
         "problems": problems,
         "ok": not problems,
     }
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def submit(
+    paths: str | Path | Sequence[str | Path],
+    *,
+    out: str | Path | None = None,
+    repo: str | Path | None = None,
+    dry_run: bool = True,
+    calibration: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+    """Build a `caliper-results` submission bundle from one or more results
+    files.
+
+    The bundle is ``manifest.json`` (see ``caliper_core::submit``) +
+    ``rows.parquet`` + ``fingerprint.json``. With ``out`` the three files are
+    written there. ``calibration`` is ``(measured_p50_us, expected_p50_us)`` for
+    the SKU's calibration GEMM, recorded in the manifest.
+
+    ``dry_run`` (the default) only builds -- it never touches a repo. With
+    ``dry_run=False`` and ``repo`` a path to a local ``caliper-results``
+    checkout, the bundle is committed to a fresh branch there (push + PR is
+    manual); a repo *URL* is not supported from here.
+
+    Returns ``{"manifest": {...}, "n_rows": int, "out": str | None, "branch":
+    str | None}``.
+    """
+    from caliper import Grid
+    from caliper._grid import _toolchain_hash
+
+    items: Sequence[str | Path]
+    items = [paths] if isinstance(paths, (str, Path)) else list(paths)
+    rows: list[dict[str, Any]] = [rec for item in items for rec in _load_records(item)]
+    if not rows:
+        raise ValueError("no rows to submit")
+
+    machine = rows[0].get("machine") or {}
+    cal_json = (
+        json.dumps({"measured_p50_us": calibration[0], "expected_p50_us": calibration[1]})
+        if calibration is not None
+        else "null"
+    )
+    manifest: dict[str, Any] = json.loads(
+        _core.submit_manifest(
+            json.dumps(rows),
+            _toolchain_hash(machine),
+            _core.__version__,
+            _now_iso(),
+            cal_json,
+        )
+    )
+
+    result: dict[str, Any] = {
+        "manifest": manifest,
+        "n_rows": len(rows),
+        "out": None,
+        "branch": None,
+    }
+
+    if out is not None:
+        d = Path(out)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        Grid(rows).to_parquet(d / "rows.parquet")
+        (d / "fingerprint.json").write_text(json.dumps(machine, indent=2) + "\n")
+        result["out"] = str(d)
+
+    if repo is not None and not dry_run:
+        result["branch"] = _commit_bundle_to_repo(Path(repo), manifest, rows, machine)
+
+    return result
+
+
+def _commit_bundle_to_repo(
+    repo: Path, manifest: dict[str, Any], rows: list[dict[str, Any]], machine: dict[str, Any]
+) -> str:
+    """Write the bundle into a fresh branch of a local ``caliper-results``
+    checkout under ``results/<arch>/<toolchain-hash>/`` and commit it. Push and
+    PR are left to the submitter."""
+    import subprocess
+
+    from caliper import Grid
+
+    if not (repo / ".git").is_dir():
+        raise ValueError(f"{repo} is not a git checkout")
+    arch = manifest["arch"]
+    thash = manifest["toolchain_hash"][:16]
+    branch = f"submit/{arch}-{thash}-{manifest['created_at'][:10]}"
+    dest = repo / "results" / arch / thash
+    dest.mkdir(parents=True, exist_ok=True)
+
+    subprocess.run(["git", "-C", str(repo), "checkout", "-b", branch], check=True)
+    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    Grid(rows).to_parquet(dest / "rows.parquet")
+    (dest / "fingerprint.json").write_text(json.dumps(machine, indent=2) + "\n")
+    subprocess.run(["git", "-C", str(repo), "add", str(dest)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", f"Add {arch} rows ({thash})"], check=True
+    )
+    return branch
 
 
 def compare(

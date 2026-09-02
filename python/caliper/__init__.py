@@ -11,7 +11,7 @@ from __future__ import annotations
 from caliper import _core
 from caliper._grid import Grid
 from caliper._record import Result
-from caliper.api import bench, compare, do_bench, sweep
+from caliper.api import bench, compare, do_bench, submit, sweep
 
 __version__: str = _core.__version__
 
@@ -29,5 +29,6 @@ __all__ = [
     "compare",
     "do_bench",
     "schema_version",
+    "submit",
     "sweep",
 ]
