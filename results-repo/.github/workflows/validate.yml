@@ -1,0 +1,39 @@
+name: validate-bundles
+
+on:
+  pull_request:
+    paths:
+      - "results/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install caliper
+        run: pip install --quiet caliper-gpu
+
+      - name: Validate every changed bundle
+        run: |
+          set -euo pipefail
+          bundles=$(
+            git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- 'results/**' \
+              | sed -n 's#^\(results/[^/]*/[^/]*\)/.*#\1#p' | sort -u
+          )
+          if [ -z "$bundles" ]; then
+            echo "no bundle directories changed"; exit 0
+          fi
+          rc=0
+          for b in $bundles; do
+            echo "::group::caliper validate $b"
+            caliper validate "$b" || rc=1
+            echo "::endgroup::"
+          done
+          exit $rc
