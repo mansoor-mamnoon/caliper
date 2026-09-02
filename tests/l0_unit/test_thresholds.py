@@ -32,8 +32,8 @@ def test_an_injected_slowdown_fires_and_within_noise_stays_silent(suffix: str) -
 
     gemm = _facet(report, "gemm")
     assert gemm["verdict"] == "regression"
-    assert gemm["delta_pct"] == pytest.approx((272.0 - 243.2) / 243.2)
-    assert gemm["delta_pct"] > gemm["noise_band_pct"]
+    assert gemm["delta"] == pytest.approx((272.0 - 243.2) / 243.2)
+    assert gemm["delta"] > gemm["band"]
 
     rmsnorm = _facet(report, "rmsnorm")
     assert rmsnorm["verdict"] == "within_noise"  # +0.5%, inside the band
@@ -74,7 +74,7 @@ def test_an_explicit_threshold_overrides_the_derived_band() -> None:
     # verdict (the independent spill regression still fails the run).
     report = compare(DATA / "base.json", DATA / "slow.json", threshold=0.20)
     assert _facet(report, "gemm")["verdict"] == "within_noise"
-    assert _facet(report, "gemm")["noise_band_pct"] == pytest.approx(0.20)
+    assert _facet(report, "gemm")["band"] == pytest.approx(0.20)
     assert report["summary"]["regressions"] == 0
 
 

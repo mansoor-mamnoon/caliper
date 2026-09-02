@@ -75,7 +75,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--threshold",
         type=float,
         metavar="PCT",
-        help="explicit noise band in percent (e.g. 10); overrides the MAD-derived band",
+        help="explicit timing noise band in percent (e.g. 10); overrides the "
+        "MAD-derived band. A register-spill regression still fails the run.",
     )
     p_cmp.add_argument(
         "--fail-on-regression",
@@ -216,12 +217,17 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0 if report["ok"] else 1
 
 
-def _fmt_ptxas_deltas(d: dict[str, object]) -> list[str]:
-    """The non-zero ptxas deltas as ``name +/-N`` strings."""
+def _fmt_deltas(d: dict[str, object]) -> list[str]:
+    """The non-zero numeric deltas of a delta-block as ``name +/-N`` strings
+    (``+.3g`` for floats, so an occupancy delta reads cleanly)."""
     out: list[str] = []
     for name, value in d.items():
+        if isinstance(value, bool):
+            continue
         if isinstance(value, int) and value != 0:
             out.append(f"{name} {value:+d}")
+        elif isinstance(value, float) and value != 0.0:
+            out.append(f"{name} {value:+.3g}")
     return out
 
 
@@ -242,23 +248,40 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         print(json.dumps(report, indent=2))
     else:
         s = report["summary"]
+        if args.arch is not None and s["facets"] == 0:
+            print(
+                f"caliper compare: no rows on --arch {args.arch}; nothing compared",
+                file=sys.stderr,
+            )
         for facet in report["facets"]:
             k = facet["key"]
             name = " ".join(
                 str(part)
-                for part in (k["kernel"] or "?", k["dtype"], k["shape"], k["layout"], k["arch"])
+                for part in (
+                    k["kernel"] or "?",
+                    k["impl"],
+                    k["dtype"],
+                    k["shape"],
+                    k["layout"],
+                    k["arch"],
+                )
                 if part
             )
             verdict = facet["verdict"]
-            delta = facet["delta_pct"]
-            band = facet["noise_band_pct"]
+            delta = facet["delta"]
+            band = facet["band"]
             if delta is None:
                 print(f"  {verdict:12} {name}  (only on one side)")
             else:
                 print(f"  {verdict:12} {name}  {delta * 100:+.1f}% (band +/-{band * 100:.1f}%)")
-            spill = _fmt_ptxas_deltas(facet["ptxas_delta"])
-            if facet["spill_regression"] or (verdict == "regression" and spill):
-                print(f"               ptxas: {', '.join(spill) or 'no change'}")
+            interesting = facet["spill_regression"] or verdict in ("regression", "improvement")
+            if interesting:
+                ptxas = _fmt_deltas(facet["ptxas_delta"])
+                if ptxas:
+                    print(f"               ptxas: {', '.join(ptxas)}")
+                occ = _fmt_deltas(facet["occupancy_delta"])
+                if occ:
+                    print(f"               occupancy: {', '.join(occ)}")
             if facet["autotune_configs_dropped"]:
                 dropped = ", ".join(facet["autotune_configs_dropped"])
                 print(f"               autotune configs dropped: {dropped}")

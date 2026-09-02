@@ -236,9 +236,9 @@ fn corpus_roofline_spec(
 // --- compare / thresholds ----------------------------------------------------
 
 /// Compare two datasets (JSON arrays of records) and return the regression
-/// report as JSON. ``opts_json`` is a `{arch?, threshold_pct?, sigma_mult?,
-/// floor_pct?}` object (``{}`` for the defaults). Raises ``ValueError`` if any
-/// input is not the expected JSON shape.
+/// report as JSON. ``opts_json`` is a `{arch?, threshold?, sigma_mult?,
+/// floor_pct?}` object (``{}`` for the defaults; all bands are fractions).
+/// Raises ``ValueError`` if any input is not the expected JSON shape.
 #[pyfunction]
 fn compare_datasets(
     baseline_json: &str,

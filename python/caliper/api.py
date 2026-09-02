@@ -439,18 +439,20 @@ def compare(
 
     Rows are aligned by *facet* (kernel, impl, dtype, shape, layout, arch). For
     each facet the candidate median is judged against a noise band derived from
-    the baseline's MAD (``sigma_mult`` sigmas, ``floor_pct`` relative floor), or
-    against an explicit ``threshold`` (a fraction, e.g. ``0.10`` for 10%). The
-    ``ptxas`` / occupancy deltas and any dropped autotune configs are reported
-    per facet.
+    the baseline's MAD (``sigma_mult`` sigmas, ``floor_pct`` relative floor,
+    capped at 50%), or against an explicit ``threshold`` (a fraction, e.g.
+    ``0.10`` for 10%). The ``ptxas`` / occupancy deltas and any dropped autotune
+    configs are reported per facet.
 
-    Returns the report dict (see ``docs``); ``report["any_regression"]`` is true
-    for a timing or a register-spill regression. With ``fail_on_regression`` the
-    report also carries ``"exit_code"`` (0 or 1).
+    Returns the report dict; each facet carries ``delta`` and ``band`` as
+    fractions. ``report["any_regression"]`` is true for a timing *or* a
+    register-spill regression -- a register-spill regression fails the run even
+    when ``threshold`` would forgive the slowdown. With ``fail_on_regression``
+    the report also carries ``"exit_code"`` (0 or 1).
     """
     opts = {
         "arch": arch,
-        "threshold_pct": threshold,
+        "threshold": threshold,
         "sigma_mult": sigma_mult,
         "floor_pct": floor_pct,
     }

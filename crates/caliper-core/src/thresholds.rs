@@ -10,8 +10,10 @@
 //! The band comes from the baseline's own median absolute deviation:
 //! `MAD -> sigma` via the 1.4826 normal-consistency constant, then
 //! `sigma_mult` sigmas, with a relative floor so a suspiciously tight baseline
-//! cannot make every wobble a regression. An explicit `threshold_pct`
-//! overrides the derived band.
+//! cannot make every wobble a regression, and a 50% cap so a suspiciously
+//! *noisy* one cannot mask a real one. An explicit `threshold` overrides the
+//! derived band for the timing verdict -- a register-spill regression still
+//! fails the run. All bands are fractions (`0.10` == 10%).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,22 +25,26 @@ use crate::schema::{Occupancy, Ptxas, Record};
 const MAD_TO_SIGMA: f64 = 1.4826;
 /// Default number of sigmas for the derived noise band.
 pub const DEFAULT_SIGMA_MULT: f64 = 3.0;
-/// Default relative floor for the noise band (2%).
+/// Default relative floor for the derived noise band (2%).
 pub const DEFAULT_FLOOR_PCT: f64 = 0.02;
+/// Cap on the *derived* band: past a 50% swing something is wrong regardless of
+/// how noisy the baseline was, so a pathological MAD can't mask a real
+/// regression. An explicit `threshold` is never capped.
+pub const MAX_DERIVED_BAND: f64 = 0.5;
 
-/// Options for a comparison run.
+/// Options for a comparison run. All bands are fractions (`0.10` == 10%).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct CompareOpts {
     /// Only compare rows on this architecture (`machine.sm_arch`); when unset,
     /// architecture is part of the facet key so cross-arch rows never align.
     pub arch: Option<String>,
-    /// Explicit noise band as a fraction (`0.10` == 10%); overrides the
-    /// MAD-derived band when set.
-    pub threshold_pct: Option<f64>,
+    /// Explicit noise band as a fraction; overrides the MAD-derived band for
+    /// every facet when set. Register-spill regressions still fail the run.
+    pub threshold: Option<f64>,
     /// Sigmas for the derived band.
     pub sigma_mult: f64,
-    /// Relative floor for the band.
+    /// Relative floor for the derived band.
     pub floor_pct: f64,
 }
 
@@ -46,7 +52,7 @@ impl Default for CompareOpts {
     fn default() -> Self {
         Self {
             arch: None,
-            threshold_pct: None,
+            threshold: None,
             sigma_mult: DEFAULT_SIGMA_MULT,
             floor_pct: DEFAULT_FLOOR_PCT,
         }
@@ -58,7 +64,9 @@ fn positive(x: f64) -> bool {
     x.is_finite() && x > 0.0
 }
 
-/// The relative noise band (a fraction of the baseline median) for one facet.
+/// The relative noise band (a fraction of the baseline median) for one facet:
+/// `sigma_mult` sigmas of the baseline's own MAD, but never below `floor_pct`
+/// and never above [`MAX_DERIVED_BAND`] (unless the floor itself is higher).
 #[must_use]
 pub fn noise_band(mad_us: f64, p50_us: f64, sigma_mult: f64, floor_pct: f64) -> f64 {
     let floor = floor_pct.max(0.0);
@@ -66,7 +74,7 @@ pub fn noise_band(mad_us: f64, p50_us: f64, sigma_mult: f64, floor_pct: f64) -> 
         return floor;
     }
     let derived = sigma_mult.max(0.0) * MAD_TO_SIGMA * (mad_us.max(0.0) / p50_us);
-    derived.max(floor)
+    derived.clamp(floor, MAX_DERIVED_BAND.max(floor))
 }
 
 /// The direction the candidate moved relative to the baseline, given a band.
@@ -200,10 +208,11 @@ pub struct FacetDelta {
     pub key: FacetKey,
     pub baseline_p50_us: Option<f64>,
     pub candidate_p50_us: Option<f64>,
-    /// `(candidate - baseline) / baseline`, when both medians are usable.
-    pub delta_pct: Option<f64>,
-    /// The noise band this facet was judged against (a fraction).
-    pub noise_band_pct: f64,
+    /// `(candidate - baseline) / baseline` as a fraction, when both medians are
+    /// usable (`0.1` == the candidate is 10% slower).
+    pub delta: Option<f64>,
+    /// The noise band this facet was judged against, as a fraction.
+    pub band: f64,
     pub verdict: Verdict,
     pub ptxas_delta: PtxasDelta,
     pub occupancy_delta: OccupancyDelta,
@@ -315,7 +324,7 @@ pub fn compare(baseline: &[Record], candidate: &[Record], opts: &CompareOpts) ->
         let b_p50 = b_best.and_then(|r| r.timing.p50_us);
         let c_p50 = c_best.and_then(|r| r.timing.p50_us);
 
-        let band = match opts.threshold_pct {
+        let band = match opts.threshold {
             Some(t) => t.max(0.0),
             None => {
                 let mad = b_best.and_then(|r| r.timing.mad_us).unwrap_or(0.0);
@@ -327,7 +336,7 @@ pub fn compare(baseline: &[Record], candidate: &[Record], opts: &CompareOpts) ->
             (Some(bp), Some(cp)) => verdict(bp, cp, band),
             _ => Verdict::Incomparable,
         };
-        let delta_pct = match (b_p50, c_p50) {
+        let delta = match (b_p50, c_p50) {
             (Some(bp), Some(cp)) if bp > 0.0 => Some((cp - bp) / bp),
             _ => None,
         };
@@ -368,8 +377,8 @@ pub fn compare(baseline: &[Record], candidate: &[Record], opts: &CompareOpts) ->
             key: key.clone(),
             baseline_p50_us: b_p50,
             candidate_p50_us: c_p50,
-            delta_pct,
-            noise_band_pct: band,
+            delta,
+            band,
             verdict: v,
             ptxas_delta: PtxasDelta::between(b_ptx, c_ptx),
             occupancy_delta: OccupancyDelta::between(b_occ, c_occ),
@@ -454,8 +463,8 @@ mod tests {
         assert_eq!(report.summary.regressions, 1);
         assert!(report.any_regression);
         let f = &report.facets[0];
-        assert!(f.delta_pct.unwrap() > 0.11);
-        assert!(f.delta_pct.unwrap() > f.noise_band_pct);
+        assert!(f.delta.unwrap() > 0.11);
+        assert!(f.delta.unwrap() > f.band);
     }
 
     #[test]
@@ -493,7 +502,7 @@ mod tests {
     fn an_explicit_threshold_overrides_the_mad_band() {
         // default band would be ~2% -> regression; a 20% threshold -> silent.
         let opts = CompareOpts {
-            threshold_pct: Some(0.20),
+            threshold: Some(0.20),
             ..CompareOpts::default()
         };
         let report = compare(
@@ -502,7 +511,37 @@ mod tests {
             &opts,
         );
         assert_eq!(report.facets[0].verdict, Verdict::WithinNoise);
-        assert!((report.facets[0].noise_band_pct - 0.20).abs() < 1e-9);
+        assert!((report.facets[0].band - 0.20).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_derived_band_is_capped_so_a_noisy_baseline_cannot_mask_a_2x() {
+        // MAD is 30% of p50 -> 3-sigma derived band would be ~1.33; capped.
+        assert_eq!(noise_band(30.0, 100.0, 3.0, 0.02), MAX_DERIVED_BAND);
+        // a 2x-slower candidate is still a regression despite the noise.
+        let report = compare(
+            &[rec("gemm", 100.0, 30.0)],
+            &[rec("gemm", 210.0, 30.0)],
+            &CompareOpts::default(),
+        );
+        assert_eq!(report.facets[0].verdict, Verdict::Regression);
+        // an explicit threshold is never capped.
+        let opts = CompareOpts {
+            threshold: Some(3.0),
+            ..CompareOpts::default()
+        };
+        assert!(
+            (compare(
+                &[rec("gemm", 100.0, 1.0)],
+                &[rec("gemm", 210.0, 1.0)],
+                &opts
+            )
+            .facets[0]
+                .band
+                - 3.0)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]

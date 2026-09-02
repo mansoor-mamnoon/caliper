@@ -217,6 +217,23 @@ def test_compare_playbook_12_exits_one_and_prints_slowdown_and_spill(
     assert "regression" in out
     assert "+11.8%" in out  # the slowdown
     assert "spill_stores_bytes +256" in out  # the spill delta, same command
+    assert "occupancy: theoretical -0.02" in out  # FR-15: ptxas *and* occupancy delta
+
+
+def test_compare_bad_arch_warns_and_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(
+        [
+            "compare",
+            "--baseline",
+            str(TESTDATA / "base.json"),
+            "--candidate",
+            str(TESTDATA / "slow.json"),
+            "--arch",
+            "sm_999",
+        ]
+    )
+    assert code == 0
+    assert "no rows on --arch sm_999" in capsys.readouterr().err
 
 
 def test_compare_within_noise_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
@@ -267,7 +284,7 @@ def test_compare_threshold_is_a_percent(capsys: pytest.CaptureFixture[str]) -> N
     assert code == 0
     report = json.loads(capsys.readouterr().out)
     gemm = next(f for f in report["facets"] if f["key"]["kernel"] == "gemm")
-    assert gemm["noise_band_pct"] == 0.20
+    assert gemm["band"] == 0.20
     assert gemm["verdict"] == "within_noise"
 
 
