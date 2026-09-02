@@ -518,6 +518,11 @@ def submit(
         raise ValueError("no rows to submit")
 
     machine = rows[0].get("machine") or {}
+    for i, rec in enumerate(rows[1:], start=1):
+        if (rec.get("machine") or {}) != machine:
+            raise ValueError(
+                f"row {i}'s machine fingerprint differs from row 0's; a bundle is one machine"
+            )
     cal_json = (
         json.dumps({"measured_p50_us": calibration[0], "expected_p50_us": calibration[1]})
         if calibration is not None
@@ -549,6 +554,8 @@ def submit(
         result["out"] = str(d)
 
     if repo is not None and not dry_run:
+        if "://" in str(repo) or str(repo).startswith("git@"):
+            raise ValueError("--repo must be a path to a local caliper-results checkout, not a URL")
         result["branch"] = _commit_bundle_to_repo(Path(repo), manifest, rows, machine)
 
     return result
@@ -570,16 +577,21 @@ def _commit_bundle_to_repo(
     thash = manifest["toolchain_hash"][:16]
     branch = f"submit/{arch}-{thash}-{manifest['created_at'][:10]}"
     dest = repo / "results" / arch / thash
-    dest.mkdir(parents=True, exist_ok=True)
 
-    subprocess.run(["git", "-C", str(repo), "checkout", "-b", branch], check=True)
+    def git(*args: str) -> None:
+        try:
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or b"").decode().strip() or exc
+            raise ValueError(f"git {args[0]} failed in {repo}: {detail}") from exc
+
+    git("checkout", "-b", branch)
+    dest.mkdir(parents=True, exist_ok=True)
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     Grid(rows).to_parquet(dest / "rows.parquet")
     (dest / "fingerprint.json").write_text(json.dumps(machine, indent=2) + "\n")
-    subprocess.run(["git", "-C", str(repo), "add", str(dest)], check=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "commit", "-m", f"Add {arch} rows ({thash})"], check=True
-    )
+    git("add", str(dest))
+    git("commit", "-m", f"Add {arch} rows ({thash})")
     return branch
 
 

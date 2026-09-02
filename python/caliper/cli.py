@@ -247,7 +247,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
             dry_run=args.dry_run or args.repo is None,
             calibration=tuple(args.calibration) if args.calibration else None,
         )
-    except (ValueError, OSError, ImportError, NotImplementedError) as exc:
+    except (ValueError, OSError, ImportError) as exc:
         print(f"caliper submit: {exc}", file=sys.stderr)
         return 2
 

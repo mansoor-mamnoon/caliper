@@ -75,7 +75,10 @@ def main() -> None:
     over_peak = json.loads(json.dumps(base[0]))
     over_peak.setdefault("roofline", {})["roofline_pct"] = 1.7  # past the schema's 1.5 clamp
     (_HERE / "over_peak_row.json").write_text(json.dumps([over_peak], indent=2) + "\n")
-    print("wrote over_peak_row.json")
+    from caliper import Grid
+
+    Grid([over_peak]).to_parquet(_HERE / "over_peak_row.parquet")
+    print("wrote over_peak_row.json + .parquet")
 
 
 if __name__ == "__main__":

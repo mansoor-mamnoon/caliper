@@ -5,7 +5,10 @@
 //! [`Manifest`]; [`validate_bundle`] is the shared gate both this repo and
 //! `caliper-results` run -- schema validity, the submission-strict field and
 //! roofline checks, and the bundle-level determinism / calibration / arch
-//! consistency checks.
+//! consistency checks. Because a submitter controls the manifest,
+//! `validate_bundle` **recomputes** the tier, kernel list, and the determinism
+//! and calibration verdicts from the bundled rows rather than trusting the
+//! manifest's own summary.
 //!
 //! The `toolchain_hash` is computed by the caller (Appendix C: sha256 of the
 //! sorted toolkit map + driver) -- `caliper-core` carries no hash dependency.
@@ -33,12 +36,64 @@ pub const SUBMISSION_REQUIRED: &[&str] = &[
 /// past ~100% is a mislabelled peak or a bad FLOP count.
 pub const SUBMISSION_MAX_ROOFLINE_PCT: f64 = 1.05;
 
-/// CoV(p50) a determinism repeat must stay under, per NFR-5.
+/// CoV(p50) a determinism repeat must stay under on the locked tier (NFR-5).
 pub const DETERMINISM_TOL_LOCKED: f64 = 0.02;
-/// CoV(p50) a determinism repeat must stay under on the unlocked (Colab) tier.
+/// CoV(p50) a determinism repeat must stay under on the unlocked (Colab) tier,
+/// for a facet whose median is at least 100 us (NFR-5).
 pub const DETERMINISM_TOL_UNLOCKED: f64 = 0.05;
+/// The looser unlocked-tier bound for a shorter facet (10-100 us), where
+/// event-timer granularity widens the spread (NFR-5).
+pub const DETERMINISM_TOL_UNLOCKED_SHORT: f64 = 0.08;
+/// Facet median (us) below which the looser unlocked bound applies.
+pub const SHORT_FACET_US: f64 = 100.0;
 /// How far the calibration GEMM's p50 may sit from its per-SKU expectation.
 pub const CALIBRATION_TOL: f64 = 0.08;
+
+/// The CoV bound for a determinism repeat, from the tier and the facet's
+/// median duration (NFR-5's duration bands).
+#[must_use]
+pub fn determinism_tolerance(tier: Tier, median_p50_us: f64) -> f64 {
+    match tier {
+        Tier::Locked => DETERMINISM_TOL_LOCKED,
+        Tier::Unlocked if median_p50_us >= SHORT_FACET_US => DETERMINISM_TOL_UNLOCKED,
+        Tier::Unlocked => DETERMINISM_TOL_UNLOCKED_SHORT,
+    }
+}
+
+fn median(mut xs: Vec<f64>) -> f64 {
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    xs.get(xs.len() / 2).copied().unwrap_or(0.0)
+}
+
+fn determinism_of(facet: String, p50s: Vec<f64>, tier: Tier) -> Determinism {
+    let tolerance = determinism_tolerance(tier, median(p50s.clone()));
+    let cov = cross_pass_cov(&p50s).unwrap_or(f64::INFINITY);
+    Determinism {
+        facet,
+        n_repeats: p50s.len(),
+        cov,
+        tolerance,
+        within_tolerance: cov <= tolerance,
+    }
+}
+
+/// Every determinism repeat in `rows`: one entry per facet with two or more
+/// rows that carry a `p50`.
+#[must_use]
+pub fn all_repeats(rows: &[Record], tier: Tier) -> Vec<Determinism> {
+    let mut by_facet: std::collections::BTreeMap<String, Vec<f64>> =
+        std::collections::BTreeMap::new();
+    for r in rows {
+        if let Some(p50) = r.timing.p50_us {
+            by_facet.entry(facet_of(r)).or_default().push(p50);
+        }
+    }
+    by_facet
+        .into_iter()
+        .filter(|(_, v)| v.len() >= 2)
+        .map(|(facet, p50s)| determinism_of(facet, p50s, tier))
+        .collect()
+}
 
 /// The clock-lock tier a bundle was measured on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,16 +118,18 @@ pub struct Calibration {
 impl Calibration {
     #[must_use]
     pub fn new(measured_p50_us: f64, expected_p50_us: f64) -> Self {
+        // `expected <= 0` is a bad input, not a passing check -- keep `ratio`
+        // finite (JSON has no infinity) and let `within_tolerance` be false.
         let ratio = if expected_p50_us > 0.0 {
             measured_p50_us / expected_p50_us
         } else {
-            f64::INFINITY
+            0.0
         };
         Self {
             measured_p50_us,
             expected_p50_us,
             ratio,
-            within_tolerance: (ratio - 1.0).abs() <= CALIBRATION_TOL,
+            within_tolerance: expected_p50_us > 0.0 && (ratio - 1.0).abs() <= CALIBRATION_TOL,
         }
     }
 }
@@ -153,33 +210,13 @@ pub fn tier_of(rows: &[Record]) -> Tier {
     }
 }
 
-/// The largest determinism repeat in `rows`: the facet with the most rows that
-/// carry a `p50`, when that count is at least two.
+/// The largest determinism repeat in `rows` (for the manifest summary); the
+/// full set is [`all_repeats`], which is what [`validate_bundle`] checks.
 #[must_use]
 pub fn largest_repeat(rows: &[Record], tier: Tier) -> Option<Determinism> {
-    let mut by_facet: std::collections::BTreeMap<String, Vec<f64>> =
-        std::collections::BTreeMap::new();
-    for r in rows {
-        if let Some(p50) = r.timing.p50_us {
-            by_facet.entry(facet_of(r)).or_default().push(p50);
-        }
-    }
-    let (facet, p50s) = by_facet.into_iter().max_by_key(|(_, v)| v.len())?;
-    if p50s.len() < 2 {
-        return None;
-    }
-    let tolerance = match tier {
-        Tier::Locked => DETERMINISM_TOL_LOCKED,
-        Tier::Unlocked => DETERMINISM_TOL_UNLOCKED,
-    };
-    let cov = cross_pass_cov(&p50s).unwrap_or(f64::INFINITY);
-    Some(Determinism {
-        facet,
-        n_repeats: p50s.len(),
-        cov,
-        tolerance,
-        within_tolerance: cov <= tolerance,
-    })
+    all_repeats(rows, tier)
+        .into_iter()
+        .max_by_key(|d| d.n_repeats)
 }
 
 /// Summarise a row set into a [`Manifest`]. `calibration` is `(measured,
@@ -262,6 +299,11 @@ pub fn submission_row_problems(row: &serde_json::Value) -> Vec<String> {
 /// `caliper-results` CI. Returns a list of human-readable problems (empty when
 /// the bundle is clean).
 ///
+/// The determinism and calibration verdicts, the tier, the arch, and the
+/// kernel list are **recomputed from the bundled rows** -- the manifest's own
+/// `within_tolerance` booleans are not trusted, since a submitter controls the
+/// manifest.
+///
 /// # Errors
 /// A `serde_json` error if any input is not the expected JSON shape.
 pub fn validate_bundle(
@@ -270,7 +312,8 @@ pub fn validate_bundle(
     fingerprint_json: &str,
 ) -> Result<Vec<String>, serde_json::Error> {
     let manifest: Manifest = serde_json::from_str(manifest_json)?;
-    let rows: Vec<serde_json::Value> = serde_json::from_str(rows_json)?;
+    let values: Vec<serde_json::Value> = serde_json::from_str(rows_json)?;
+    let records: Vec<Record> = serde_json::from_str(rows_json)?;
     let fingerprint: Machine = serde_json::from_str(fingerprint_json)?;
 
     let mut problems = Vec::new();
@@ -281,11 +324,11 @@ pub fn validate_bundle(
             manifest.schema_version
         ));
     }
-    if manifest.n_rows != rows.len() {
+    if manifest.n_rows != values.len() {
         problems.push(format!(
             "manifest n_rows ({}) != rows file length ({})",
             manifest.n_rows,
-            rows.len()
+            values.len()
         ));
     }
     if fingerprint.sm_arch.as_deref() != Some(manifest.arch.as_str()) {
@@ -295,7 +338,7 @@ pub fn validate_bundle(
         ));
     }
 
-    for (i, row) in rows.iter().enumerate() {
+    for (i, row) in values.iter().enumerate() {
         let text = row.to_string();
         match crate::schema::validate_json(&text) {
             Ok(schema_problems) => {
@@ -317,25 +360,64 @@ pub fn validate_bundle(
         }
     }
 
-    if let Some(c) = &manifest.calibration {
-        if !c.within_tolerance {
-            problems.push(format!(
-                "calibration GEMM p50 is {:.1}% of expected ({:.1} vs {:.1} us; tolerance +/-{:.0}%)",
-                c.ratio * 100.0,
-                c.measured_p50_us,
-                c.expected_p50_us,
-                CALIBRATION_TOL * 100.0
-            ));
+    // Byte-identical rows are always a mistake (a determinism repeat differs in
+    // its p50). Cross-bundle dedupe is the `caliper-results` CI's job.
+    for i in 1..values.len() {
+        if values[..i].contains(&values[i]) {
+            problems.push(format!("row {i}: exact duplicate of an earlier row"));
         }
     }
-    if let Some(d) = &manifest.determinism {
-        if !d.within_tolerance {
+
+    if !records.is_empty() {
+        let tier = tier_of(&records);
+        if tier != manifest.tier {
             problems.push(format!(
-                "determinism repeat CoV {:.1}% exceeds the {:.1}% tolerance for facet {}",
-                d.cov * 100.0,
-                d.tolerance * 100.0,
-                d.facet
+                "manifest tier ({:?}) != the rows' tier ({tier:?})",
+                manifest.tier
             ));
+        }
+        let kernels: Vec<String> = records
+            .iter()
+            .filter_map(|r| r.kernel.name.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if !kernels.is_empty() && kernels != manifest.kernels {
+            problems.push(format!(
+                "manifest kernels ({:?}) != the rows' kernels ({kernels:?})",
+                manifest.kernels
+            ));
+        }
+
+        for d in all_repeats(&records, tier) {
+            if !d.within_tolerance {
+                problems.push(format!(
+                    "determinism repeat CoV {:.1}% exceeds the {:.1}% tolerance for facet {}",
+                    d.cov * 100.0,
+                    d.tolerance * 100.0,
+                    d.facet
+                ));
+            }
+        }
+    }
+
+    // The calibration numbers are submitter-supplied, but the *verdict* is
+    // recomputed here so flipping `within_tolerance` in the manifest is inert.
+    if let Some(c) = &manifest.calibration {
+        if c.expected_p50_us <= 0.0 {
+            problems.push("calibration expected_p50_us must be > 0".to_string());
+        } else {
+            let fresh = Calibration::new(c.measured_p50_us, c.expected_p50_us);
+            if !fresh.within_tolerance {
+                problems.push(format!(
+                    "calibration GEMM p50 is {:.1}% of expected ({:.1} vs {:.1} us; \
+                     tolerance +/-{:.0}%)",
+                    fresh.ratio * 100.0,
+                    fresh.measured_p50_us,
+                    fresh.expected_p50_us,
+                    CALIBRATION_TOL * 100.0
+                ));
+            }
         }
     }
 
@@ -535,5 +617,106 @@ mod tests {
         )
         .unwrap();
         assert!(problems.iter().any(|p| p.contains("fingerprint.sm_arch")));
+    }
+
+    #[test]
+    fn a_tampered_manifest_verdict_does_not_get_a_bad_bundle_past_the_gate() {
+        let rows: Vec<Record> = [243.0, 300.0, 210.0, 275.0]
+            .iter()
+            .map(|&p| {
+                let mut r = row("corpus:gemm", "bf16", p, "sm_80");
+                r.flags.push("clocks-unlocked".into());
+                r
+            })
+            .collect();
+        let mut m = derive_manifest(&rows, "abc", "0.3.0", "t", None).unwrap();
+        // the submitter lies: flip the verdict, and drop the block entirely.
+        m.determinism = None;
+        let problems = validate_bundle(
+            &serde_json::to_string(&m).unwrap(),
+            &rows_json(&rows),
+            &fingerprint("sm_80"),
+        )
+        .unwrap();
+        assert!(problems
+            .iter()
+            .any(|p| p.contains("determinism repeat CoV")));
+    }
+
+    #[test]
+    fn a_short_facet_gets_the_looser_unlocked_bound() {
+        // ~6.7% CoV on a ~40 us facet: past the 5% >=100us bound, inside 8%.
+        assert_eq!(
+            determinism_tolerance(Tier::Unlocked, 40.0),
+            DETERMINISM_TOL_UNLOCKED_SHORT
+        );
+        assert_eq!(
+            determinism_tolerance(Tier::Unlocked, 400.0),
+            DETERMINISM_TOL_UNLOCKED
+        );
+        assert_eq!(
+            determinism_tolerance(Tier::Locked, 40.0),
+            DETERMINISM_TOL_LOCKED
+        );
+        let rows: Vec<Record> = [40.0, 43.0, 38.0, 41.0]
+            .iter()
+            .map(|&p| {
+                let mut r = row("corpus:softmax", "bf16", p, "sm_80");
+                r.flags.push("clocks-unlocked".into());
+                r
+            })
+            .collect();
+        let m = derive_manifest(&rows, "abc", "0.3.0", "t", None).unwrap();
+        assert_eq!(
+            m.determinism.as_ref().unwrap().tolerance,
+            DETERMINISM_TOL_UNLOCKED_SHORT
+        );
+        assert!(m.determinism.as_ref().unwrap().within_tolerance);
+    }
+
+    #[test]
+    fn byte_identical_rows_are_rejected_as_duplicates() {
+        let r = row("corpus:gemm", "bf16", 243.0, "sm_80");
+        let rows = [r.clone(), r];
+        let m = derive_manifest(&rows, "abc", "0.3.0", "t", None).unwrap();
+        let problems = validate_bundle(
+            &serde_json::to_string(&m).unwrap(),
+            &rows_json(&rows),
+            &fingerprint("sm_80"),
+        )
+        .unwrap();
+        assert!(problems.iter().any(|p| p.contains("exact duplicate")));
+    }
+
+    #[test]
+    fn a_manifest_tier_or_kernel_list_that_disagrees_with_the_rows_is_rejected() {
+        let rows = [row("corpus:gemm", "bf16", 243.0, "sm_80")];
+        let mut m = derive_manifest(&rows, "abc", "0.3.0", "t", None).unwrap();
+        m.tier = Tier::Unlocked; // rows carry no clocks-unlocked flag
+        m.kernels = vec!["corpus:gemm".into(), "corpus:phantom".into()];
+        let problems = validate_bundle(
+            &serde_json::to_string(&m).unwrap(),
+            &rows_json(&rows),
+            &fingerprint("sm_80"),
+        )
+        .unwrap();
+        assert!(problems.iter().any(|p| p.contains("manifest tier")));
+        assert!(problems.iter().any(|p| p.contains("manifest kernels")));
+    }
+
+    #[test]
+    fn a_non_positive_calibration_expectation_is_a_clean_problem() {
+        let rows = [row("corpus:gemm", "bf16", 243.0, "sm_80")];
+        let mut m = derive_manifest(&rows, "abc", "0.3.0", "t", None).unwrap();
+        m.calibration = Some(Calibration::new(100.0, 0.0));
+        let problems = validate_bundle(
+            &serde_json::to_string(&m).unwrap(),
+            &rows_json(&rows),
+            &fingerprint("sm_80"),
+        )
+        .unwrap();
+        assert!(problems
+            .iter()
+            .any(|p| p == "calibration expected_p50_us must be > 0"));
     }
 }
